@@ -18,7 +18,7 @@ void HandlerSmellingSaltsWazaPower(EventFactor::EventHandlerArgs::Object** args,
     if (!bpp->CheckSick(Pml::WazaData::WazaSick::WAZASICK_MAHI))
         return;
 
-    Common::RewriteEventVar(args, EventVar::Label::WAZA_POWER, Common::GetEventVar(args, EventVar::Label::WAZA_POWER) * 2);
+    Common::MulEventVar(args, EventVar::Label::WAZA_POWER_RATIO, 8192);
     Common::SetWorkValue(args, WorkValue::A, 1);
 }
 
