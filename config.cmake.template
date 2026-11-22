@@ -44,6 +44,7 @@ add_module(
                 include/game
                 include
                 src/mod
+                src/common
         SOURCE src/common/exlaunch/
                src/mega/
 )
