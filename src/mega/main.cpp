@@ -27,6 +27,7 @@
 #include "externals/Dpr/Battle/View/BattleViewCore.h"
 #include "externals/Dpr/Battle/View/BtlvInput.h"
 #include "externals/Dpr/Battle/View/Systems/BattleViewSystem.h"
+#include "externals/Dpr/Battle/View/UI/BUIActionList.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaButton.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
 #include "externals/Pml/Item/ItemData.h"
@@ -99,11 +100,11 @@ static_assert(kMegaY.primaryType == 9 && kMegaY.secondaryType == 2);
 
 bool gMegaArmed = false;
 
-inline bool isMegaStone(uint16_t itemId) {
+inline bool isMegaStone(int32_t itemId) {
     return itemId == kCharizarditeX || itemId == kCharizarditeY;
 }
 
-inline bool isMegaKeyItem(uint16_t itemId) {
+inline bool isMegaKeyItem(int32_t itemId) {
     return itemId == kKeyStone || itemId == kMegaRing;
 }
 
@@ -121,7 +122,10 @@ inline void ensureMegaStarterItems() {
     grantedThisSession = true;
 
     PlayerWork::getClass()->initIfNeeded();
-    if (!hasMegaAccessory() && ItemWork::IsAddItem(kKeyStone, 1)) {
+    if (PlayerWork::GetItem(kMegaRing).fields.Count == 0 && ItemWork::IsAddItem(kMegaRing, 1)) {
+        ItemWork::AddItem(kMegaRing, 1);
+    }
+    if (PlayerWork::GetItem(kKeyStone).fields.Count == 0 && ItemWork::IsAddItem(kKeyStone, 1)) {
         ItemWork::AddItem(kKeyStone, 1);
     }
     if (PlayerWork::GetItem(kCharizarditeX).fields.Count == 0 && ItemWork::IsAddItem(kCharizarditeX, 1)) {
@@ -195,6 +199,34 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
             if (btn != nullptr && btn->fields._text != nullptr) {
                 btn->fields._text->virtual_set_color((eligible && armed) ? armedColor : normalColor);
             }
+        }
+    }
+}
+
+inline void pollMegaToggleInput(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+    if (wazaList == nullptr || !wazaList->fields._IsShow_k__BackingField) {
+        return;
+    }
+
+    const bool eligible = targetCharizardMegaForm(wazaList->fields._btlPokeParam) > 0;
+    if (!eligible) {
+        return;
+    }
+
+    constexpr int32_t kToggleMask =
+        GameController::ButtonMask::L |
+        GameController::ButtonMask::R |
+        GameController::ButtonMask::StickL |
+        GameController::ButtonMask::StickR;
+
+    if (Dpr::Battle::View::BtlvInput::GetPush(kToggleMask, true)) {
+        gMegaArmed = !gMegaArmed;
+        syncGimmickUiVisuals(wazaList, true, gMegaArmed);
+
+        Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
+        if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
+            core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
+            core->fields._UISystem_k__BackingField->PlaySe(kSeUiSelect);
         }
     }
 }
@@ -281,7 +313,6 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
 } // namespace mega
 
 // Read-only parameter delegation for Mega Stones and Key Stone / Mega Ring.
-// Never mutates ItemTable or ItemInfo in place, keeping Bag closing and Y-shortcuts intact.
 HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID) {
         using PrmID = Pml::Item::ItemData::PrmID;
@@ -321,6 +352,21 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     }
 };
 
+// Guarantee valid sprites for Mega Stones & Key Stone/Mega Ring even when LoadSpriteItem is called directly.
+HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
+    static void Callback(int32_t itemId, void* onLoadedCallback, bool isUnload, bool isLarge) {
+        if (mega::isMegaStone(itemId)) {
+            Orig(mega::kFireStone, onLoadedCallback, isUnload, isLarge);
+            return;
+        }
+        if (mega::isMegaKeyItem(itemId)) {
+            Orig(mega::kOddKeystone, onLoadedCallback, isUnload, isLarge);
+            return;
+        }
+        Orig(itemId, onLoadedCallback, isUnload, isLarge);
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this,
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
@@ -345,31 +391,22 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
         Orig(__this, deltaTime);
+        mega::pollMegaToggleInput(__this);
+    }
+};
 
-        if (__this == nullptr || !__this->fields._IsShow_k__BackingField) {
+// Also poll inside BUIActionList$$OnUpdate so Lumi's Madrid Battle UI (which keeps focus on BUIActionList)
+// receives the Mega toggle cleanly.
+HOOK_DEFINE_TRAMPOLINE(BUIActionList$$OnUpdate) {
+    static void Callback(Dpr::Battle::View::UI::BUIActionList::Object* __this, float deltaTime) {
+        Orig(__this, deltaTime);
+        if (__this == nullptr || !__this->fields._IsFocus_k__BackingField) {
             return;
         }
-
-        const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
-        if (!eligible) {
-            return;
-        }
-
-        constexpr int32_t kToggleMask =
-            GameController::ButtonMask::L |
-            GameController::ButtonMask::R |
-            GameController::ButtonMask::StickL |
-            GameController::ButtonMask::StickR;
-
-        if (Dpr::Battle::View::BtlvInput::GetPush(kToggleMask, true)) {
-            mega::gMegaArmed = !mega::gMegaArmed;
-            mega::syncGimmickUiVisuals(__this, true, mega::gMegaArmed);
-
-            Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
-            if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
-                core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
-                core->fields._UISystem_k__BackingField->PlaySe(mega::kSeUiSelect);
-            }
+        Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
+        if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
+            core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
+            mega::pollMegaToggleInput(core->fields._UISystem_k__BackingField->fields._wazaList);
         }
     }
 };
@@ -534,9 +571,11 @@ extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
 
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
+    ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
+    BUIActionList$$OnUpdate::InstallAtOffset(0x01e8bdb0);
     OnSubmitWazaButton::InstallAtOffset(0x01d2cee8);
     CalcActionPriority$$Execute::InstallAtOffset(0x021ad570);
     ProcessActionCore$$action::InstallAtOffset(0x021c0de0);
