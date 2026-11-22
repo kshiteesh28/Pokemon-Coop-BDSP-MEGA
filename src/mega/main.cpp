@@ -41,6 +41,7 @@
 #include "externals/UnityEngine/Component.h"
 #include "externals/UnityEngine/GameObject.h"
 #include "externals/UnityEngine/Transform.h"
+#include "externals/XLSXContent/ItemTable.h"
 
 #include <cstdint>
 #include <cstring>
@@ -116,34 +117,6 @@ inline bool isMegaKeyItem(int32_t itemId) {
     return itemId == kKeyStone || itemId == kMegaRing;
 }
 
-inline bool hasMegaAccessory() {
-    PlayerWork::getClass()->initIfNeeded();
-    return PlayerWork::GetItem(kKeyStone).fields.Count > 0 ||
-           PlayerWork::GetItem(kMegaRing).fields.Count > 0;
-}
-
-inline void ensureMegaStarterItems() {
-    static bool grantedThisSession = false;
-    if (grantedThisSession) {
-        return;
-    }
-    grantedThisSession = true;
-
-    PlayerWork::getClass()->initIfNeeded();
-    if (PlayerWork::GetItem(kMegaRing).fields.Count == 0 && ItemWork::IsAddItem(kMegaRing, 1)) {
-        ItemWork::AddItem(kMegaRing, 1);
-    }
-    if (PlayerWork::GetItem(kKeyStone).fields.Count == 0 && ItemWork::IsAddItem(kKeyStone, 1)) {
-        ItemWork::AddItem(kKeyStone, 1);
-    }
-    if (PlayerWork::GetItem(kCharizarditeX).fields.Count == 0 && ItemWork::IsAddItem(kCharizarditeX, 1)) {
-        ItemWork::AddItem(kCharizarditeX, 1);
-    }
-    if (PlayerWork::GetItem(kCharizarditeY).fields.Count == 0 && ItemWork::IsAddItem(kCharizarditeY, 1)) {
-        ItemWork::AddItem(kCharizarditeY, 1);
-    }
-}
-
 // Allocation-free ASCII substring match on an IL2CPP UTF-16 System::String.
 inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) {
     if (str == nullptr || needle == nullptr) {
@@ -170,7 +143,6 @@ inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) 
     return false;
 }
 
-// Returns custom English name/description for Mega items when requested from item message files.
 inline const char* lookupMegaItemText(System::String::Object* fileName, System::String::Object* label) {
     if (label == nullptr) {
         return nullptr;
@@ -223,6 +195,8 @@ inline bool getMegaFlag(const Dpr::Battle::Logic::BTL_ACTION_PARAM::Object& para
     return ((static_cast<uint64_t>(param.fields.raw) >> kMegaFlagBit) & 1ULL) != 0;
 }
 
+// Allow any Charizard holding Charizardite X/Y to Mega Evolve once per battle
+// without blocking on Key Stone / Mega Ring Bag presence while Bag item-table support is validated.
 inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
     if (pokeParam == nullptr) {
         return -1;
@@ -234,7 +208,7 @@ inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* po
         pokeParam->GetItem(),
         kCharizarditeX,
         kCharizarditeY,
-        hasMegaAccessory(),
+        true,
         megaUsed
     );
 }
@@ -272,7 +246,7 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
         }
     }
 
-    // Visual indicator that works on both Lumi and vanilla battle UIs: tint move text gold when Mega is armed.
+    // Always highlight move text bright gold when Mega Evolution is armed.
     if (wazaList->fields._wazaButtons != nullptr) {
         const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.2f, .a = 1.0f };
         const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
@@ -312,43 +286,6 @@ inline void pollMegaToggleInput(Dpr::Battle::View::UI::BUIWazaList::Object* waza
             core->fields._UISystem_k__BackingField->PlaySe(kSeUiSelect);
         }
     }
-}
-
-inline bool isGimmickIconActive(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
-    if (wazaList == nullptr) {
-        return false;
-    }
-    auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
-    if (rootTransform == nullptr) {
-        return false;
-    }
-
-    auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton"));
-    if (gimmickButton == nullptr) {
-        return false;
-    }
-
-    if (auto* gimmicks = gimmickButton->Find(System::String::Create("Gimmicks")); gimmicks != nullptr) {
-        if (auto* megaIcon = gimmicks->Find(System::String::Create("MegaIcon")); megaIcon != nullptr) {
-            auto* megaIconGo = reinterpret_cast<UnityEngine::Component::Object*>(megaIcon)->get_gameObject();
-            if (megaIconGo == nullptr || !megaIconGo->get_activeSelf()) {
-                return false;
-            }
-            if (auto* activeTf = megaIcon->Find(System::String::Create("Active")); activeTf != nullptr) {
-                auto* activeGo = reinterpret_cast<UnityEngine::Component::Object*>(activeTf)->get_gameObject();
-                return activeGo != nullptr && activeGo->get_activeSelf();
-            }
-        }
-        return false;
-    }
-
-    if (gimmickButton->get_childCount() > 0) {
-        if (auto* stateTf = gimmickButton->GetChild(0); stateTf != nullptr) {
-            auto* stateGo = reinterpret_cast<UnityEngine::Component::Object*>(stateTf)->get_gameObject();
-            return stateGo != nullptr && stateGo->get_activeSelf();
-        }
-    }
-    return false;
 }
 
 void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* container,
@@ -395,9 +332,6 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
 }
 } // namespace mega
 
-// Installed in exl_main (never hooked by subsdk1). On first game call—after nnMain and
-// subsdk1's exl_features_main() have finished—installs all remaining subsdk2 hooks so
-// subsdk1's HOOK_DEFINE_REPLACE calls cannot overwrite subsdk2.
 HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID) {
         if (!mega::gPostInitHooksInstalled) {
@@ -446,8 +380,44 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     }
 };
 
-// Uses exact custom sprites from TEXTUREMASS (item_0660/0678/0696/0773) if present in RomFS;
-// otherwise falls back cleanly to Fire Stone / Odd Keystone so "??" never appears.
+// Keep ItemWork::GetItemData aligned with ItemData::GetParam using non-registerable Magma Stone (F_FUNC = 0).
+HOOK_DEFINE_TRAMPOLINE(ItemWork$$GetItemData) {
+    static XLSXContent::ItemTable::SheetItem::Object* Callback(uint16_t id) {
+        auto* data = Orig(id);
+        if (data == nullptr) {
+            return nullptr;
+        }
+        if (mega::isMegaStone(id)) {
+            if (auto* ref = Orig(mega::kCharcoal); ref != nullptr) {
+                data->fields.type = ref->fields.type;
+                data->fields.group = ref->fields.group;
+                data->fields.group_id = ref->fields.group_id;
+                data->fields.fld_pocket = ref->fields.fld_pocket;
+                data->fields.field_func = ref->fields.field_func;
+                data->fields.battle_func = ref->fields.battle_func;
+                data->fields.flags0 = ref->fields.flags0;
+            }
+            if (auto* iconRef = Orig(mega::kFireStone); iconRef != nullptr) {
+                data->fields.iconid = iconRef->fields.iconid;
+            }
+        } else if (mega::isMegaKeyItem(id)) {
+            if (auto* ref = Orig(mega::kMagmaStone); ref != nullptr) {
+                data->fields.type = ref->fields.type;
+                data->fields.group = ref->fields.group;
+                data->fields.group_id = ref->fields.group_id;
+                data->fields.fld_pocket = ref->fields.fld_pocket;
+                data->fields.field_func = ref->fields.field_func;
+                data->fields.battle_func = ref->fields.battle_func;
+                data->fields.flags0 = ref->fields.flags0;
+            }
+            if (auto* iconRef = Orig(mega::kOddKeystone); iconRef != nullptr) {
+                data->fields.iconid = iconRef->fields.iconid;
+            }
+        }
+        return data;
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
     static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
         if (const char* customName = mega::customMegaAtlasSpriteName(itemId, isLarge); customName != nullptr) {
@@ -469,7 +439,6 @@ HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
     }
 };
 
-// Supplies missing Bag names and descriptions ("info") for Mega Stones, Mega Ring, and Key Stone.
 HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
@@ -498,18 +467,18 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
                          uint8_t pokeIndex,
                          Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest) {
         Orig(__this, bpp, pokeIndex, dest);
-        mega::gMegaArmed = false;
         const bool eligible = mega::targetCharizardMegaForm(bpp) > 0;
-        mega::syncGimmickUiVisuals(__this, eligible, false);
+        mega::gMegaArmed = eligible;
+        mega::syncGimmickUiVisuals(__this, eligible, mega::gMegaArmed);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
         Orig(__this);
-        mega::gMegaArmed = false;
         const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
-        mega::syncGimmickUiVisuals(__this, eligible, false);
+        mega::gMegaArmed = eligible;
+        mega::syncGimmickUiVisuals(__this, eligible, mega::gMegaArmed);
     }
 };
 
@@ -519,6 +488,23 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
         if (__this != nullptr && __this->fields._IsFocus_k__BackingField) {
             mega::pollMegaToggleInput(__this);
         }
+    }
+};
+
+// ABI-safe trampoline on BUIWazaList::OnSubmit (0x01d2c6e0) to tag bit 34 on _destActionParam.
+HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
+        Orig(__this);
+        if (__this == nullptr || !__this->fields._IsValid_k__BackingField) {
+            return;
+        }
+        auto* destActionParam = __this->fields._destActionParam;
+        if (destActionParam != nullptr &&
+            mega::gMegaArmed &&
+            mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0) {
+            destActionParam->fields.value.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
+        }
+        mega::gMegaArmed = false;
     }
 };
 
@@ -550,21 +536,6 @@ HOOK_DEFINE_TRAMPOLINE(CMD_ACT_PokeChangeEffect_WaitCore) {
             return false;
         }
         return Orig(__this, isGChange);
-    }
-};
-
-HOOK_DEFINE_INLINE(OnSubmitWazaButton) {
-    static void Callback(exl::hook::nx64::InlineCtx* ctx) {
-        auto* __this = reinterpret_cast<Dpr::Battle::View::UI::BUIWazaList::Object*>(ctx->X[19]);
-        auto* destActionParam = __this->fields._destActionParam;
-        ctx->X[8] = reinterpret_cast<u64>(destActionParam);
-
-        if (destActionParam != nullptr &&
-            mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0 &&
-            (mega::gMegaArmed || mega::isGimmickIconActive(__this))) {
-            destActionParam->fields.value.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
-        }
-        mega::gMegaArmed = false;
     }
 };
 
@@ -667,7 +638,6 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isSymbol, bool isMitu, System::String::Object* overlapBgm, int32_t overlapSetupEffectId,
                          bool isCantUseBall) {
         mega::gMegaArmed = false;
-        mega::ensureMegaStarterItems();
         FlagWork::SetFlag(
             FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
             isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI
@@ -682,7 +652,6 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
                          int32_t mapAttrib, int32_t weatherType, int32_t rule, int32_t enemyID0, int32_t enemyID1,
                          int32_t partnerID) {
         mega::gMegaArmed = false;
-        mega::ensureMegaStarterItems();
         FlagWork::SetFlag(
             FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
             rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
@@ -699,14 +668,15 @@ void installPostInitHooks() {
     }
     gPostInitHooksInstalled = true;
 
+    ItemWork$$GetItemData::InstallAtOffset(0x01aea840);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
+    BUIWazaList$$OnSubmit::InstallAtOffset(0x01d2c6e0);
     BUIActionList$$OnUpdate::InstallAtOffset(0x01e8bdb0);
-    OnSubmitWazaButton::InstallAtOffset(0x01d2cee8);
     CalcActionPriority$$Execute::InstallAtOffset(0x021ad570);
     ProcessActionCore$$action::InstallAtOffset(0x021c0de0);
     setupPokeAction_FromClientInstruction::InstallAtOffset(0x021cdbf0);
@@ -720,9 +690,6 @@ void installPostInitHooks() {
 
 extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
-
-    // Only install ItemData$$GetParam at module load; remaining hooks install lazily after
-    // nnMain + subsdk1's exl_features_main() finish so subsdk1 never overwrites subsdk2.
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
 }
 
