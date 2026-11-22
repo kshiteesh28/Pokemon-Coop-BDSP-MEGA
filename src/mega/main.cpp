@@ -18,10 +18,10 @@ struct MegaFormData {
     int form;
     int hp, attack, defense, specialAttack, specialDefense, speed;
     int ability;
-    bool dragonSecondaryType;
+    int primaryType, secondaryType;
 };
-constexpr MegaFormData kMegaX{1, 78, 130, 111, 130, 85, 100, kToughClaws, true};
-constexpr MegaFormData kMegaY{2, 78, 104, 78, 159, 115, 100, kDrought, false};
+constexpr MegaFormData kMegaX{1, 78, 130, 111, 130, 85, 100, kToughClaws, 9, 15};
+constexpr MegaFormData kMegaY{2, 78, 104, 78, 159, 115, 100, kDrought, 9, 2};
 
 constexpr int charizardMegaForm(int species, int originalForm,
                                 int heldItem, int charizarditeX,
@@ -45,6 +45,8 @@ static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizard
 static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, true, true) == -1);
 static_assert(kMegaX.ability == kToughClaws && kMegaY.ability == kDrought);
 static_assert(kMegaX.hp == 78 && kMegaY.hp == 78);
+static_assert(kMegaX.primaryType == 9 && kMegaX.secondaryType == 15);
+static_assert(kMegaY.primaryType == 9 && kMegaY.secondaryType == 2);
 }
 
 // Hook installation will be added after the game ABI, loader coexistence,
