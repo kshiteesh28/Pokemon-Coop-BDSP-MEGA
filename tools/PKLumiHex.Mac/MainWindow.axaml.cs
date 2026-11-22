@@ -10,6 +10,7 @@ public partial class MainWindow : Window
     private const int CharizarditeX = 660;
     private const int CharizarditeY = 678;
     private const int MegaRing = 696;
+    private const int MegaBracelet = 744;
     private const int KeyStone = 773;
 
     private SaveFile? _sav;
@@ -190,7 +191,10 @@ public partial class MainWindow : Window
         ContainerPicker.ItemsSource = containers;
         ContainerPicker.SelectedIndex = 0;
 
-        var pockets = _sav.Inventory.Select((p, idx) => $"{p.Type} ({idx})").ToList();
+        var pockets = new List<string>();
+        if (_sav is SAV8BS)
+            pockets.Add("All Owned Items (BDSP Raw)");
+        pockets.AddRange(_sav.Inventory.Select((p, idx) => $"{p.Type} ({idx})"));
         PocketPicker.ItemsSource = pockets;
         if (pockets.Count > 0)
             PocketPicker.SelectedIndex = 0;
@@ -397,8 +401,30 @@ public partial class MainWindow : Window
             return;
 
         var filter = BagFilterBox.Text?.Trim() ?? string.Empty;
-        var pouch = _sav.Inventory[PocketPicker.SelectedIndex];
         var rows = new List<string>();
+
+        if (_sav is SAV8BS sav8bs && PocketPicker.SelectedIndex == 0)
+        {
+            int maxId = Math.Min(sav8bs.MaxItemID, GameInfo.Strings.Item.Count - 1);
+            for (int id = 1; id <= maxId; id++)
+            {
+                var entry = sav8bs.Items.GetItem(id);
+                if (entry.Count <= 0)
+                    continue;
+
+                var label = $"{GetItemName(id)} ({id})  ×{entry.Count}";
+                if (string.IsNullOrEmpty(filter) || label.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    rows.Add(label);
+            }
+            BagItemList.ItemsSource = rows;
+            return;
+        }
+
+        int pouchIdx = _sav is SAV8BS ? PocketPicker.SelectedIndex - 1 : PocketPicker.SelectedIndex;
+        if (pouchIdx < 0 || pouchIdx >= _sav.Inventory.Count)
+            return;
+
+        var pouch = _sav.Inventory[pouchIdx];
         foreach (var item in pouch.Items)
         {
             if (item.Index <= 0 || item.Count <= 0)
@@ -437,6 +463,26 @@ public partial class MainWindow : Window
         }
 
         int count = Math.Max(0, (int)(BagItemCountSpinner.Value ?? 1));
+
+        // For BDSP / Luminescent Platinum saves, write directly to MyItem8b so non-whitelisted
+        // items (Mega Bracelet, Mega Ring, Key Stone, Charizardite X/Y) actually persist and display.
+        if (_sav is SAV8BS sav8bs)
+        {
+            if (itemId > sav8bs.MaxItemID)
+            {
+                BagStatusText.Text = $"Item ID {itemId} exceeds save MaxItemID ({sav8bs.MaxItemID}).";
+                return;
+            }
+            var entry = sav8bs.Items.GetItem(itemId);
+            entry.Count = Math.Clamp(count, 0, 999);
+            sav8bs.Items.SetItem(itemId, entry);
+            if (PocketPicker.SelectedIndex != 0)
+                PocketPicker.SelectedIndex = 0;
+            RefreshBagList();
+            BagStatusText.Text = $"Saved {GetItemName(itemId)} ({itemId}) ×{entry.Count} to BDSP Bag. Click Save (+ .bak)!";
+            return;
+        }
+
         var pouches = _sav.Inventory;
         var pouch = pouches[PocketPicker.SelectedIndex];
         if (!UpsertItemInPouch(pouch, itemId, count))
@@ -461,6 +507,23 @@ public partial class MainWindow : Window
         if (_sav is null)
             return;
 
+        if (_sav is SAV8BS sav8bs)
+        {
+            foreach (var id in new[] { CharizarditeX, CharizarditeY, MegaBracelet, MegaRing, KeyStone })
+            {
+                if (id <= sav8bs.MaxItemID)
+                {
+                    var entry = sav8bs.Items.GetItem(id);
+                    entry.Count = 1;
+                    sav8bs.Items.SetItem(id, entry);
+                }
+            }
+            PocketPicker.SelectedIndex = 0;
+            RefreshBagList();
+            BagStatusText.Text = "Added Mega Bracelet (744), Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save (+ .bak)!";
+            return;
+        }
+
         var pouches = _sav.Inventory;
         var itemsPouch = pouches.FirstOrDefault(p => p.Type == InventoryType.Items) ?? pouches.FirstOrDefault();
         var keyPouch = pouches.FirstOrDefault(p => p.Type == InventoryType.KeyItems) ?? itemsPouch;
@@ -473,12 +536,13 @@ public partial class MainWindow : Window
 
         UpsertItemInPouch(itemsPouch, CharizarditeX, 1);
         UpsertItemInPouch(itemsPouch, CharizarditeY, 1);
+        UpsertItemInPouch(keyPouch, MegaBracelet, 1);
         UpsertItemInPouch(keyPouch, MegaRing, 1);
         UpsertItemInPouch(keyPouch, KeyStone, 1);
         _sav.Inventory = pouches;
 
         RefreshBagList();
-        BagStatusText.Text = "Added Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
+        BagStatusText.Text = "Added Mega Bracelet (744), Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
     }
 
     private static bool UpsertItemInPouch(InventoryPouch pouch, int itemId, int count)
