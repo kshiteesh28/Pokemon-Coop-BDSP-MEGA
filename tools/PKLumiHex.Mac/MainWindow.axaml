@@ -60,7 +60,7 @@
                   <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto">
                     <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,10">
                       <TextBlock Classes="fieldLabel" Text="Species (search by name or ID)" />
-                      <AutoCompleteBox Name="SpeciesAutoBox" Watermark="e.g. Charizard" FilterMode="ContainsOrdinalIgnoreCase" />
+                      <AutoCompleteBox Name="SpeciesAutoBox" Watermark="e.g. Charizard" FilterMode="Contains" />
                     </StackPanel>
                     <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,10,10">
                       <TextBlock Classes="fieldLabel" Text="Nickname" />
@@ -68,12 +68,12 @@
                     </StackPanel>
                     <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,10">
                       <TextBlock Classes="fieldLabel" Text="Held Item (search by name or ID)" />
-                      <AutoCompleteBox Name="HeldItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="ContainsOrdinalIgnoreCase" />
+                      <AutoCompleteBox Name="HeldItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="Contains" />
                     </StackPanel>
 
                     <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,10,0">
                       <TextBlock Classes="fieldLabel" Text="Ability (search by name or ID)" />
-                      <AutoCompleteBox Name="AbilityAutoBox" Watermark="e.g. Blaze" FilterMode="ContainsOrdinalIgnoreCase" />
+                      <AutoCompleteBox Name="AbilityAutoBox" Watermark="e.g. Blaze" FilterMode="Contains" />
                     </StackPanel>
                     <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,*" Margin="0,0,10,0">
                       <StackPanel Grid.Column="0" Margin="0,0,8,0">
@@ -97,10 +97,10 @@
                 <StackPanel Spacing="8">
                   <TextBlock Classes="section" Text="MOVESET (SEARCH BY NAME OR ID)" />
                   <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
-                    <AutoCompleteBox Grid.Row="0" Grid.Column="0" Name="Move1AutoBox" Watermark="Move 1" FilterMode="ContainsOrdinalIgnoreCase" Margin="0,0,10,8" />
-                    <AutoCompleteBox Grid.Row="0" Grid.Column="1" Name="Move2AutoBox" Watermark="Move 2" FilterMode="ContainsOrdinalIgnoreCase" Margin="0,0,0,8" />
-                    <AutoCompleteBox Grid.Row="1" Grid.Column="0" Name="Move3AutoBox" Watermark="Move 3" FilterMode="ContainsOrdinalIgnoreCase" Margin="0,0,10,0" />
-                    <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="Move4AutoBox" Watermark="Move 4" FilterMode="ContainsOrdinalIgnoreCase" />
+                    <AutoCompleteBox Grid.Row="0" Grid.Column="0" Name="Move1AutoBox" Watermark="Move 1" FilterMode="Contains" Margin="0,0,10,8" />
+                    <AutoCompleteBox Grid.Row="0" Grid.Column="1" Name="Move2AutoBox" Watermark="Move 2" FilterMode="Contains" Margin="0,0,0,8" />
+                    <AutoCompleteBox Grid.Row="1" Grid.Column="0" Name="Move3AutoBox" Watermark="Move 3" FilterMode="Contains" Margin="0,0,10,0" />
+                    <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="Move4AutoBox" Watermark="Move 4" FilterMode="Contains" />
                   </Grid>
                 </StackPanel>
               </Border>
@@ -172,7 +172,7 @@
                 <TextBlock Classes="section" Text="ADD OR EDIT ITEM" />
                 <StackPanel>
                   <TextBlock Classes="fieldLabel" Text="Item (search by name or ID)" />
-                  <AutoCompleteBox Name="BagItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="ContainsOrdinalIgnoreCase" />
+                  <AutoCompleteBox Name="BagItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="Contains" />
                 </StackPanel>
                 <StackPanel>
                   <TextBlock Classes="fieldLabel" Text="Quantity (0 removes item)" />
