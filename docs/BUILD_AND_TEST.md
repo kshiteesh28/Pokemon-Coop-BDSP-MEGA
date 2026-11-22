@@ -8,17 +8,17 @@ Scope: ExeFS builds from this fork and local testing with a matching Pokémon Br
 
 Before changing hooks, record the game edition/version and executable build ID, Lumi content release, this fork's commit SHA, runtime/emulator version, and a backup save. An ExeFS build can succeed even when its offsets or RomFS dependencies are wrong. Run the unmodified fork once to establish a bootable baseline.
 
-The fork's `config.cmake.template` defines a Diamond variant with title ID `0100000011D90000` and module ID 9. Its `Dockerfile` uses `devkitpro/devkita64:20260219`, configures CMake, and builds `RomBase_release_all`. The `RomBase` target name is part of the present build setup; changing it requires updating Docker and Actions paths. The actual package includes `main.npdm` and `subsdk9` according to [Lumi's ExeFS guide](https://luminescent.team/rom-hacking/exefs/guide). Do not assume `subsdk1` from the earlier design draft.
+The fork's original `RomBase` target uses module ID 9. This branch adds an isolated `MegaExtension` target with module ID 2 for Diamond title ID `0100000011D90000`. The Ryujinx workflow builds `MegaExtension_release_ryujinx` and uploads **only `subsdk2`**, so it will not overwrite Lumi's existing `main.npdm`. This module currently contains verified Charizard X/Y selection logic and no installed battle hooks; it is not yet a playable Mega Evolution feature. Its `Dockerfile` uses `devkitpro/devkita64:20260219`, configures CMake, and builds `RomBase_release_all`. The `RomBase` target name is part of the present build setup; changing it requires updating Docker and Actions paths. The actual package includes `main.npdm` and `subsdk9` according to [Lumi's ExeFS guide](https://luminescent.team/rom-hacking/exefs/guide). Do not assume `subsdk1` from the earlier design draft.
 
 ## GitHub Actions build (no local compiler required)
 
 1. Open this fork's **Actions → Build**. If GitHub asks, enable workflows.
 2. Select **Run workflow** and choose `feature/mega-evolution`, or push a commit to that branch. The branch's workflow builds on pushes and has `workflow_dispatch`.
 3. Open the run and confirm **Configure Release**, **Build Release**, and **Upload Release artifact** succeeded. For debugging, check the parallel Debug steps.
-4. Download `exefs_release` or `exefs_debug` from the run's **Artifacts** section. Choose **exefs_ryujinx_Release** or **exefs_ryujinx_Debug** for Ryujinx. GitHub's [artifact download guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts) explains the UI.
+4. Download `exefs_release` or `exefs_debug` from the run's **Artifacts** section. Choose **mega_subsdk2_ryujinx_Release** or **mega_subsdk2_ryujinx_Debug** for Ryujinx. GitHub's [artifact download guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts) explains the UI.
 5. Extract the Ryujinx artifact and inspect its directory tree before installing it.
 
-This branch corrects the pull request trigger to `master`. The branch's workflow uploads only Ryujinx artifacts and has no nightly release job.
+This branch corrects the pull request trigger to `master`. The branch's workflow uploads only the Ryujinx subsdk2 artifact and has no nightly release job.
 
 ## Optional local Docker build
 
