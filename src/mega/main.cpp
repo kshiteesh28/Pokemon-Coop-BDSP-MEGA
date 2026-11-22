@@ -6,6 +6,7 @@
 #include "externals/GameController.h"
 #include "externals/ItemWork.h"
 #include "externals/PlayerWork.h"
+#include "externals/SpriteAtlasID.h"
 #include "externals/Dpr/Battle/Logic/ActPri.h"
 #include "externals/Dpr/Battle/Logic/BATTLE_SETUP_PARAM.h"
 #include "externals/Dpr/Battle/Logic/BTL_ACTION_PARAM.h"
@@ -30,8 +31,11 @@
 #include "externals/Dpr/Battle/View/UI/BUIActionList.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaButton.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
+#include "externals/Dpr/Message/MessageManager.h"
+#include "externals/Dpr/UI/UIManager.h"
 #include "externals/Pml/Item/ItemData.h"
 #include "externals/Pml/PokeParty.h"
+#include "externals/System/Action.h"
 #include "externals/System/String.h"
 #include "externals/UnityEngine/Color.h"
 #include "externals/UnityEngine/Component.h"
@@ -39,6 +43,7 @@
 #include "externals/UnityEngine/Transform.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace mega {
 constexpr int kCharizardSpecies = 6;
@@ -47,8 +52,8 @@ constexpr int kMegaXForm = 1;
 constexpr int kMegaYForm = 2;
 
 // Verified indices from src/mod/data/items.h.
-constexpr uint16_t kFireStone = 82;       // Guaranteed BDSP stone icon sprite
-constexpr uint16_t kOddKeystone = 111;    // Guaranteed BDSP keystone icon sprite
+constexpr uint16_t kFireStone = 82;       // Fallback BDSP stone icon sprite
+constexpr uint16_t kOddKeystone = 111;    // Fallback BDSP keystone icon sprite
 constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket
 constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (F_FUNC = 0)
 constexpr uint16_t kCharizarditeX = 660;
@@ -98,7 +103,10 @@ static_assert(kMegaX.hp == 78 && kMegaY.hp == 78);
 static_assert(kMegaX.primaryType == 9 && kMegaX.secondaryType == 15);
 static_assert(kMegaY.primaryType == 9 && kMegaY.secondaryType == 2);
 
+bool gPostInitHooksInstalled = false;
 bool gMegaArmed = false;
+
+void installPostInitHooks();
 
 inline bool isMegaStone(int32_t itemId) {
     return itemId == kCharizarditeX || itemId == kCharizarditeY;
@@ -133,6 +141,81 @@ inline void ensureMegaStarterItems() {
     }
     if (PlayerWork::GetItem(kCharizarditeY).fields.Count == 0 && ItemWork::IsAddItem(kCharizarditeY, 1)) {
         ItemWork::AddItem(kCharizarditeY, 1);
+    }
+}
+
+// Allocation-free ASCII substring match on an IL2CPP UTF-16 System::String.
+inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) {
+    if (str == nullptr || needle == nullptr) {
+        return false;
+    }
+    const int32_t hayLen = str->fields.m_stringLength;
+    const int32_t needleLen = static_cast<int32_t>(std::strlen(needle));
+    if (needleLen == 0 || hayLen < needleLen) {
+        return false;
+    }
+    const uint16_t* chars = reinterpret_cast<const uint16_t*>(&str->fields.m_firstChar);
+    for (int32_t i = 0; i <= hayLen - needleLen; ++i) {
+        bool match = true;
+        for (int32_t j = 0; j < needleLen; ++j) {
+            if (chars[i + j] != static_cast<uint16_t>(static_cast<unsigned char>(needle[j]))) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns custom English name/description for Mega items when requested from item message files.
+inline const char* lookupMegaItemText(System::String::Object* fileName, System::String::Object* label) {
+    if (label == nullptr) {
+        return nullptr;
+    }
+    const bool isItemName =
+        utf16ContainsAscii(label, "ITEMNAME_") ||
+        (fileName != nullptr && utf16ContainsAscii(fileName, "itemname"));
+    const bool isItemInfo =
+        utf16ContainsAscii(label, "ITEMINFO_") ||
+        (fileName != nullptr && utf16ContainsAscii(fileName, "iteminfo"));
+
+    if (!isItemName && !isItemInfo) {
+        return nullptr;
+    }
+
+    if (utf16ContainsAscii(label, "660")) {
+        return isItemInfo
+            ? "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
+            : "Charizardite X";
+    }
+    if (utf16ContainsAscii(label, "678")) {
+        return isItemInfo
+            ? "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
+            : "Charizardite Y";
+    }
+    if (utf16ContainsAscii(label, "696")) {
+        return isItemInfo
+            ? "This ring contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
+            : "Mega Ring";
+    }
+    if (utf16ContainsAscii(label, "773")) {
+        return isItemInfo
+            ? "A stone filled with an unexplained power. It makes Pokémon that hold a Mega Stone Mega Evolve."
+            : "Key Stone";
+    }
+    return nullptr;
+}
+
+inline const char* customMegaAtlasSpriteName(int32_t itemId, bool isLarge) {
+    switch (itemId) {
+        case kCharizarditeX: return isLarge ? "item_0660_L" : "item_0660";
+        case kCharizarditeY: return isLarge ? "item_0678_L" : "item_0678";
+        case kMegaRing:      return isLarge ? "item_0696_L" : "item_0696";
+        case kKeyStone:      return isLarge ? "item_0773_L" : "item_0773";
+        default:             return nullptr;
     }
 }
 
@@ -189,7 +272,7 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
         }
     }
 
-    // Visual fallback that works on both Lumi and vanilla battle UIs: tint move text gold when Mega is armed.
+    // Visual indicator that works on both Lumi and vanilla battle UIs: tint move text gold when Mega is armed.
     if (wazaList->fields._wazaButtons != nullptr) {
         const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.2f, .a = 1.0f };
         const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
@@ -312,9 +395,15 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
 }
 } // namespace mega
 
-// Read-only parameter delegation for Mega Stones and Key Stone / Mega Ring.
+// Installed in exl_main (never hooked by subsdk1). On first game call—after nnMain and
+// subsdk1's exl_features_main() have finished—installs all remaining subsdk2 hooks so
+// subsdk1's HOOK_DEFINE_REPLACE calls cannot overwrite subsdk2.
 HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID) {
+        if (!mega::gPostInitHooksInstalled) {
+            mega::installPostInitHooks();
+        }
+
         using PrmID = Pml::Item::ItemData::PrmID;
 
         if (mega::isMegaStone(itemno)) {
@@ -327,6 +416,9 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
                 case PrmID::GROUPID:
                 case PrmID::SET_TO_POKE:
                 case PrmID::INACTIVE:
+                case PrmID::SORT:
+                case PrmID::F_FUNC:
+                case PrmID::B_FUNC:
                     return Orig(mega::kCharcoal, prmID);
                 default:
                     break;
@@ -341,7 +433,9 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
                 case PrmID::GROUPID:
                 case PrmID::SET_TO_POKE:
                 case PrmID::INACTIVE:
+                case PrmID::SORT:
                 case PrmID::F_FUNC:
+                case PrmID::B_FUNC:
                     return Orig(mega::kMagmaStone, prmID);
                 default:
                     break;
@@ -352,18 +446,49 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
     }
 };
 
-// Guarantee valid sprites for Mega Stones & Key Stone/Mega Ring even when LoadSpriteItem is called directly.
+// Uses exact custom sprites from TEXTUREMASS (item_0660/0678/0696/0773) if present in RomFS;
+// otherwise falls back cleanly to Fire Stone / Odd Keystone so "??" never appears.
 HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
-    static void Callback(int32_t itemId, void* onLoadedCallback, bool isUnload, bool isLarge) {
-        if (mega::isMegaStone(itemId)) {
-            Orig(mega::kFireStone, onLoadedCallback, isUnload, isLarge);
-            return;
-        }
-        if (mega::isMegaKeyItem(itemId)) {
-            Orig(mega::kOddKeystone, onLoadedCallback, isUnload, isLarge);
+    static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
+        if (const char* customName = mega::customMegaAtlasSpriteName(itemId, isLarge); customName != nullptr) {
+            Dpr::UI::UIManager::getClass()->initIfNeeded();
+            if (auto* uiMgr = Dpr::UI::UIManager::get_Instance(); uiMgr != nullptr) {
+                if (auto* exactSpr = uiMgr->GetAtlasSprite(SpriteAtlasID::TEXTUREMASS, System::String::Create(customName));
+                    exactSpr != nullptr) {
+                    if (onLoadedCallback != nullptr) {
+                        onLoadedCallback->Invoke(reinterpret_cast<Il2CppObject*>(exactSpr));
+                    }
+                    return;
+                }
+            }
+            const int32_t fallbackId = mega::isMegaStone(itemId) ? mega::kFireStone : mega::kOddKeystone;
+            Orig(fallbackId, onLoadedCallback, isUnload, isLarge);
             return;
         }
         Orig(itemId, onLoadedCallback, isUnload, isLarge);
+    }
+};
+
+// Supplies missing Bag names and descriptions ("info") for Mega Stones, Mega Ring, and Key Stone.
+HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
+    static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
+                                            System::String::Object* fileName,
+                                            System::String::Object* label) {
+        if (const char* custom = mega::lookupMegaItemText(fileName, label); custom != nullptr) {
+            return System::String::Create(custom);
+        }
+        return Orig(__this, fileName, label);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetNameMessage) {
+    static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
+                                            System::String::Object* fileName,
+                                            System::String::Object* label) {
+        if (const char* custom = mega::lookupMegaItemText(fileName, label); custom != nullptr) {
+            return System::String::Create(custom);
+        }
+        return Orig(__this, fileName, label);
     }
 };
 
@@ -391,12 +516,12 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
         Orig(__this, deltaTime);
-        mega::pollMegaToggleInput(__this);
+        if (__this != nullptr && __this->fields._IsFocus_k__BackingField) {
+            mega::pollMegaToggleInput(__this);
+        }
     }
 };
 
-// Also poll inside BUIActionList$$OnUpdate so Lumi's Madrid Battle UI (which keeps focus on BUIActionList)
-// receives the Mega toggle cleanly.
 HOOK_DEFINE_TRAMPOLINE(BUIActionList$$OnUpdate) {
     static void Callback(Dpr::Battle::View::UI::BUIActionList::Object* __this, float deltaTime) {
         Orig(__this, deltaTime);
@@ -567,11 +692,16 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
     }
 };
 
-extern "C" void exl_main(void*, void*) {
-    exl::hook::Initialize();
+namespace mega {
+void installPostInitHooks() {
+    if (gPostInitHooksInstalled) {
+        return;
+    }
+    gPostInitHooksInstalled = true;
 
-    ItemData$$GetParam::InstallAtOffset(0x0249b950);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
+    MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
+    MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
@@ -585,6 +715,15 @@ extern "C" void exl_main(void*, void*) {
     CMD_ChangeForm_Start::InstallAtOffset(0x01c86d9c);
     SetupBattleWild::InstallAtOffset(0x02c3abc0);
     SetupBattleTrainer::InstallAtOffset(0x02c3b800);
+}
+} // namespace mega
+
+extern "C" void exl_main(void*, void*) {
+    exl::hook::Initialize();
+
+    // Only install ItemData$$GetParam at module load; remaining hooks install lazily after
+    // nnMain + subsdk1's exl_features_main() finish so subsdk1 never overwrites subsdk2.
+    ItemData$$GetParam::InstallAtOffset(0x0249b950);
 }
 
 extern "C" NORETURN void exl_exception_entry() {
