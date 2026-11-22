@@ -40,17 +40,18 @@ jobs:
             -Bbuild
 
       - name: Build Ryujinx package
-        run: cmake --build build --target RomBase_release_ryujinx --parallel 2
+        run: cmake --build build --target MegaExtension_release_ryujinx --parallel 2
 
       - name: Check package files
         run: |
-          test -d build/RomBase_releases/ryujinx
-          find build/RomBase_releases/ryujinx -type f -print
+          test -d build/MegaExtension_releases/ryujinx
+          find build/MegaExtension_releases/ryujinx -type f -print
+          test -f build/MegaExtension_releases/ryujinx/mods/contents/0100000011D90000/MegaExtension/exefs/subsdk2
 
       - name: Upload Ryujinx package
         uses: actions/upload-artifact@v4
         with:
-          name: exefs_ryujinx_${{ matrix.build_type }}
-          path: build/RomBase_releases/ryujinx/
+          name: mega_subsdk2_ryujinx_${{ matrix.build_type }}
+          path: build/MegaExtension_releases/ryujinx/
           if-no-files-found: error
           retention-days: 14
