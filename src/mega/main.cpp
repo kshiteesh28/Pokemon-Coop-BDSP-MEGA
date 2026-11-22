@@ -8,6 +8,7 @@ constexpr int kCharizardSpecies = 6;
 constexpr int kBaseForm = 0;
 constexpr int kMegaXForm = 1;
 constexpr int kMegaYForm = 2;
+// Indices from this fork's data headers; validate against the installed RomFS.
 constexpr int kCharizarditeX = 660;
 constexpr int kCharizarditeY = 678;
 constexpr int kKeyStone = 773;
