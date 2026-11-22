@@ -13,12 +13,12 @@ The fork's `config.cmake.template` defines a Diamond variant with title ID `0100
 ## GitHub Actions build (no local compiler required)
 
 1. Open this fork's **Actions → Build**. If GitHub asks, enable workflows.
-2. Select **Run workflow** and choose `feature/mega-evolution`, or push a commit to that branch. The existing workflow builds on pushes and has `workflow_dispatch`.
+2. Select **Run workflow** and choose `feature/mega-evolution`, or push a commit to that branch. The branch's workflow builds on pushes and has `workflow_dispatch`.
 3. Open the run and confirm **Configure Release**, **Build Release**, and **Upload Release artifact** succeeded. For debugging, check the parallel Debug steps.
-4. Download `exefs_release` or `exefs_debug` from the run's **Artifacts** section. Choose **exefs_ryujinx_release** or **exefs_ryujinx_debug** for Ryujinx. The workflow also retains the Atmosphère artifacts. GitHub's [artifact download guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts) explains the UI.
+4. Download `exefs_release` or `exefs_debug` from the run's **Artifacts** section. Choose **exefs_ryujinx_Release** or **exefs_ryujinx_Debug** for Ryujinx. GitHub's [artifact download guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts) explains the UI.
 5. Extract the Ryujinx artifact and inspect its directory tree before installing it.
 
-This branch corrects the pull request trigger to `master`. The inherited nightly release job runs only for pushes to `master` and expects `NIGHTLY_BUILD_TOKEN`; a failed release job does not necessarily mean compilation failed. Use the run artifacts first.
+This branch corrects the pull request trigger to `master`. The branch's workflow uploads only Ryujinx artifacts and has no nightly release job.
 
 ## Optional local Docker build
 
