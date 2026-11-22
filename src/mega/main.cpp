@@ -33,7 +33,9 @@
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
 #include "externals/Dpr/Message/MessageManager.h"
 #include "externals/Dpr/UI/UIManager.h"
+#include "externals/Pml/PmlUse.h"
 #include "externals/Pml/Item/ItemData.h"
+#include "externals/Pml/Item/ItemManager.h"
 #include "externals/Pml/PokeParty.h"
 #include "externals/System/Action.h"
 #include "externals/System/String.h"
@@ -52,14 +54,15 @@ constexpr int kBaseForm = 0;
 constexpr int kMegaXForm = 1;
 constexpr int kMegaYForm = 2;
 
-// Verified indices from src/mod/data/items.h.
+// Verified item indices from src/mod/data/items.h (line - 4).
 constexpr uint16_t kFireStone = 82;       // Fallback BDSP stone icon sprite
 constexpr uint16_t kOddKeystone = 111;    // Fallback BDSP keystone icon sprite
 constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket
-constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (F_FUNC = 0)
+constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (field_func = 0)
 constexpr uint16_t kCharizarditeX = 660;
 constexpr uint16_t kCharizarditeY = 678;
 constexpr uint16_t kMegaRing = 696;
+constexpr uint16_t kMegaBracelet = 744;
 constexpr uint16_t kKeyStone = 773;
 constexpr int kToughClaws = 181;
 constexpr int kDrought = 70;
@@ -79,10 +82,10 @@ constexpr MegaFormData kMegaY{2, 78, 104, 78, 159, 115, 100, kDrought, 9, 2};
 
 constexpr int charizardMegaForm(int species, int originalForm,
                                 int heldItem, int charizarditeX,
-                                int charizarditeY, bool hasKeyStone,
+                                int charizarditeY, bool hasMegaAccessoryInBag,
                                 bool trainerAlreadyMegaEvolved) {
     if (species != kCharizardSpecies || originalForm != kBaseForm ||
-        !hasKeyStone || trainerAlreadyMegaEvolved) {
+        !hasMegaAccessoryInBag || trainerAlreadyMegaEvolved) {
         return -1;
     }
     if (heldItem == charizarditeX && charizarditeX != charizarditeY)
@@ -97,14 +100,18 @@ static_assert(charizardMegaForm(6, 0, kCharizarditeY, kCharizarditeX, kCharizard
 static_assert(charizardMegaForm(6, 0, 679, kCharizarditeX, kCharizarditeY, true, false) == -1);
 static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, false, false) == -1);
 static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, true, true) == -1);
-static_assert(kKeyStone == 773);
 static_assert(kMegaRing == 696);
+static_assert(kMegaBracelet == 744);
+static_assert(kKeyStone == 773);
 static_assert(kMegaX.ability == kToughClaws && kMegaY.ability == kDrought);
 static_assert(kMegaX.hp == 78 && kMegaY.hp == 78);
 static_assert(kMegaX.primaryType == 9 && kMegaX.secondaryType == 15);
 static_assert(kMegaY.primaryType == 9 && kMegaY.secondaryType == 2);
 
 bool gPostInitHooksInstalled = false;
+bool gItemTablePatched = false;
+bool gMegaBattleAllowed = true;
+bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
 
 void installPostInitHooks();
@@ -114,10 +121,81 @@ inline bool isMegaStone(int32_t itemId) {
 }
 
 inline bool isMegaKeyItem(int32_t itemId) {
-    return itemId == kKeyStone || itemId == kMegaRing;
+    return itemId == kMegaBracelet || itemId == kMegaRing || itemId == kKeyStone;
 }
 
-// Allocation-free ASCII substring match on an IL2CPP UTF-16 System::String.
+// Requires Mega Bracelet (744), Mega Ring (696), or Key Stone (773) in the trainer's Bag.
+inline bool hasMegaAccessoryInBag() {
+    PlayerWork::getClass()->initIfNeeded();
+    return PlayerWork::GetItem(kMegaBracelet).fields.Count > 0 ||
+           PlayerWork::GetItem(kMegaRing).fields.Count > 0 ||
+           PlayerWork::GetItem(kKeyStone).fields.Count > 0;
+}
+
+// Patch the loaded master ItemTable in memory once so ItemWork, UIBag, BagItemPanel,
+// Party, and Battle all see consistent pocket/hold/flag metadata with zero Bag input corruption.
+inline void patchItemTableInMemory() {
+    if (gItemTablePatched) {
+        return;
+    }
+
+    XLSXContent::ItemTable::Object* table = nullptr;
+    if (auto* pmlUse = Pml::PmlUse::get_Instance(); pmlUse != nullptr) {
+        table = pmlUse->fields.itemPrmTotal;
+    }
+    if (table == nullptr) {
+        if (auto* mgrClass = Pml::Item::ItemManager::getClass();
+            mgrClass != nullptr && mgrClass->static_fields != nullptr && mgrClass->static_fields->s_Instance != nullptr) {
+            table = mgrClass->static_fields->s_Instance->fields.m_alldata;
+        }
+    }
+    if (table == nullptr || table->fields.Item == nullptr) {
+        return;
+    }
+
+    auto* items = table->fields.Item;
+    if (items->max_length <= kKeyStone) {
+        return;
+    }
+
+    auto* charcoal = items->m_Items[kCharcoal];
+    auto* magmaStone = items->m_Items[kMagmaStone];
+    auto* fireStone = items->m_Items[kFireStone];
+    auto* oddKeystone = items->m_Items[kOddKeystone];
+    if (charcoal == nullptr || magmaStone == nullptr) {
+        return;
+    }
+
+    auto applyTemplate = [](XLSXContent::ItemTable::SheetItem::Object* target,
+                            XLSXContent::ItemTable::SheetItem::Object* tmpl,
+                            XLSXContent::ItemTable::SheetItem::Object* iconTmpl) {
+        if (target == nullptr || tmpl == nullptr) {
+            return;
+        }
+        target->fields.type = tmpl->fields.type;
+        target->fields.group = tmpl->fields.group;
+        target->fields.group_id = tmpl->fields.group_id;
+        target->fields.fld_pocket = tmpl->fields.fld_pocket;
+        target->fields.field_func = tmpl->fields.field_func;
+        target->fields.battle_func = tmpl->fields.battle_func;
+        target->fields.flags0 = tmpl->fields.flags0;
+        if (target->fields.sort == 0) {
+            target->fields.sort = tmpl->fields.sort;
+        }
+        if (iconTmpl != nullptr) {
+            target->fields.iconid = iconTmpl->fields.iconid;
+        }
+    };
+
+    applyTemplate(items->m_Items[kCharizarditeX], charcoal, fireStone);
+    applyTemplate(items->m_Items[kCharizarditeY], charcoal, fireStone);
+    applyTemplate(items->m_Items[kMegaBracelet], magmaStone, oddKeystone);
+    applyTemplate(items->m_Items[kMegaRing], magmaStone, oddKeystone);
+    applyTemplate(items->m_Items[kKeyStone], magmaStone, oddKeystone);
+
+    gItemTablePatched = true;
+}
+
 inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) {
     if (str == nullptr || needle == nullptr) {
         return false;
@@ -173,6 +251,11 @@ inline const char* lookupMegaItemText(System::String::Object* fileName, System::
             ? "This ring contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
             : "Mega Ring";
     }
+    if (utf16ContainsAscii(label, "744")) {
+        return isItemInfo
+            ? "This bracelet contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
+            : "Mega Bracelet";
+    }
     if (utf16ContainsAscii(label, "773")) {
         return isItemInfo
             ? "A stone filled with an unexplained power. It makes Pokémon that hold a Mega Stone Mega Evolve."
@@ -186,6 +269,7 @@ inline const char* customMegaAtlasSpriteName(int32_t itemId, bool isLarge) {
         case kCharizarditeX: return isLarge ? "item_0660_L" : "item_0660";
         case kCharizarditeY: return isLarge ? "item_0678_L" : "item_0678";
         case kMegaRing:      return isLarge ? "item_0696_L" : "item_0696";
+        case kMegaBracelet:  return isLarge ? "item_0744_L" : "item_0744";
         case kKeyStone:      return isLarge ? "item_0773_L" : "item_0773";
         default:             return nullptr;
     }
@@ -195,22 +279,60 @@ inline bool getMegaFlag(const Dpr::Battle::Logic::BTL_ACTION_PARAM::Object& para
     return ((static_cast<uint64_t>(param.fields.raw) >> kMegaFlagBit) & 1ULL) != 0;
 }
 
-// Allow any Charizard holding Charizardite X/Y to Mega Evolve once per battle
-// without blocking on Key Stone / Mega Ring Bag presence while Bag item-table support is validated.
 inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
-    if (pokeParam == nullptr) {
+    if (pokeParam == nullptr || !gMegaBattleAllowed) {
         return -1;
     }
-    const bool megaUsed = FlagWork::GetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE);
     return charizardMegaForm(
         pokeParam->GetMonsNo(),
         pokeParam->GetFormNo(),
         pokeParam->GetItem(),
         kCharizarditeX,
         kCharizarditeY,
-        true,
-        megaUsed
+        hasMegaAccessoryInBag(),
+        gMegaUsedThisBattle
     );
+}
+
+inline UnityEngine::GameObject::Object* findMegaActiveObject(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+    if (wazaList == nullptr) {
+        return nullptr;
+    }
+    auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
+    if (rootTransform == nullptr) {
+        return nullptr;
+    }
+    auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton"));
+    if (gimmickButton == nullptr) {
+        return nullptr;
+    }
+    if (auto* gimmicks = gimmickButton->Find(System::String::Create("Gimmicks")); gimmicks != nullptr) {
+        if (auto* megaIcon = gimmicks->Find(System::String::Create("MegaIcon")); megaIcon != nullptr) {
+            if (auto* activeTf = megaIcon->Find(System::String::Create("Active")); activeTf != nullptr) {
+                return reinterpret_cast<UnityEngine::Component::Object*>(activeTf)->get_gameObject();
+            }
+        }
+        return nullptr;
+    }
+    if (gimmickButton->get_childCount() > 0) {
+        if (auto* stateTf = gimmickButton->GetChild(0); stateTf != nullptr) {
+            return reinterpret_cast<UnityEngine::Component::Object*>(stateTf)->get_gameObject();
+        }
+    }
+    return nullptr;
+}
+
+inline bool hasGimmickButton(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+    if (wazaList == nullptr) {
+        return false;
+    }
+    auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
+    return rootTransform != nullptr && rootTransform->Find(System::String::Create("GimmickButton")) != nullptr;
+}
+
+inline bool isGimmickIconActive(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+    auto* activeGo = findMegaActiveObject(wazaList);
+    return activeGo != nullptr && activeGo->get_activeSelf();
 }
 
 inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList, bool eligible, bool armed) {
@@ -220,8 +342,7 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
 
     auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
     if (rootTransform != nullptr) {
-        auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton"));
-        if (gimmickButton != nullptr) {
+        if (auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton")); gimmickButton != nullptr) {
             if (auto* btnGo = reinterpret_cast<UnityEngine::Component::Object*>(gimmickButton)->get_gameObject(); btnGo != nullptr) {
                 btnGo->SetActive(eligible);
             }
@@ -246,7 +367,6 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
         }
     }
 
-    // Always highlight move text bright gold when Mega Evolution is armed.
     if (wazaList->fields._wazaButtons != nullptr) {
         const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.2f, .a = 1.0f };
         const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
@@ -260,13 +380,24 @@ inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* waz
     }
 }
 
-inline void pollMegaToggleInput(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+inline void handleMegaToggleAfterOrig(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList, bool origHandledStick) {
     if (wazaList == nullptr || !wazaList->fields._IsShow_k__BackingField) {
         return;
     }
 
     const bool eligible = targetCharizardMegaForm(wazaList->fields._btlPokeParam) > 0;
     if (!eligible) {
+        return;
+    }
+
+    // If Lumi's Madrid UI already toggled MegaIcon/Active via StickL/StickR inside Orig,
+    // adopt its highlighted state instead of flipping it back off.
+    if (origHandledStick && hasGimmickButton(wazaList)) {
+        const bool iconActive = isGimmickIconActive(wazaList);
+        if (iconActive != gMegaArmed) {
+            gMegaArmed = iconActive;
+            syncGimmickUiVisuals(wazaList, true, gMegaArmed);
+        }
         return;
     }
 
@@ -311,7 +442,7 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     msgDesc->fields.message->AddArg(param->GetID());
     msgDesc->fields.message->AddArg(pokeAction->fields.clientID);
     msgDesc->fields.message->AddArg(param->GetItem());
-    msgDesc->fields.message->AddArg(kKeyStone);
+    msgDesc->fields.message->AddArg(kMegaBracelet);
 
     auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
     container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
@@ -337,84 +468,11 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         if (!mega::gPostInitHooksInstalled) {
             mega::installPostInitHooks();
         }
-
-        using PrmID = Pml::Item::ItemData::PrmID;
-
-        if (mega::isMegaStone(itemno)) {
-            switch (prmID) {
-                case PrmID::ICONID:
-                    return Orig(mega::kFireStone, PrmID::ICONID);
-                case PrmID::F_POCKET:
-                case PrmID::ITEM_TYPE:
-                case PrmID::GROUP:
-                case PrmID::GROUPID:
-                case PrmID::SET_TO_POKE:
-                case PrmID::INACTIVE:
-                case PrmID::SORT:
-                case PrmID::F_FUNC:
-                case PrmID::B_FUNC:
-                    return Orig(mega::kCharcoal, prmID);
-                default:
-                    break;
-            }
-        } else if (mega::isMegaKeyItem(itemno)) {
-            switch (prmID) {
-                case PrmID::ICONID:
-                    return Orig(mega::kOddKeystone, PrmID::ICONID);
-                case PrmID::F_POCKET:
-                case PrmID::ITEM_TYPE:
-                case PrmID::GROUP:
-                case PrmID::GROUPID:
-                case PrmID::SET_TO_POKE:
-                case PrmID::INACTIVE:
-                case PrmID::SORT:
-                case PrmID::F_FUNC:
-                case PrmID::B_FUNC:
-                    return Orig(mega::kMagmaStone, prmID);
-                default:
-                    break;
-            }
+        if (!mega::gItemTablePatched) {
+            mega::patchItemTableInMemory();
         }
 
         return Orig(itemno, prmID);
-    }
-};
-
-// Keep ItemWork::GetItemData aligned with ItemData::GetParam using non-registerable Magma Stone (F_FUNC = 0).
-HOOK_DEFINE_TRAMPOLINE(ItemWork$$GetItemData) {
-    static XLSXContent::ItemTable::SheetItem::Object* Callback(uint16_t id) {
-        auto* data = Orig(id);
-        if (data == nullptr) {
-            return nullptr;
-        }
-        if (mega::isMegaStone(id)) {
-            if (auto* ref = Orig(mega::kCharcoal); ref != nullptr) {
-                data->fields.type = ref->fields.type;
-                data->fields.group = ref->fields.group;
-                data->fields.group_id = ref->fields.group_id;
-                data->fields.fld_pocket = ref->fields.fld_pocket;
-                data->fields.field_func = ref->fields.field_func;
-                data->fields.battle_func = ref->fields.battle_func;
-                data->fields.flags0 = ref->fields.flags0;
-            }
-            if (auto* iconRef = Orig(mega::kFireStone); iconRef != nullptr) {
-                data->fields.iconid = iconRef->fields.iconid;
-            }
-        } else if (mega::isMegaKeyItem(id)) {
-            if (auto* ref = Orig(mega::kMagmaStone); ref != nullptr) {
-                data->fields.type = ref->fields.type;
-                data->fields.group = ref->fields.group;
-                data->fields.group_id = ref->fields.group_id;
-                data->fields.fld_pocket = ref->fields.fld_pocket;
-                data->fields.field_func = ref->fields.field_func;
-                data->fields.battle_func = ref->fields.battle_func;
-                data->fields.flags0 = ref->fields.flags0;
-            }
-            if (auto* iconRef = Orig(mega::kOddKeystone); iconRef != nullptr) {
-                data->fields.iconid = iconRef->fields.iconid;
-            }
-        }
-        return data;
     }
 };
 
@@ -466,19 +524,27 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
                          uint8_t pokeIndex,
                          Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest) {
-        Orig(__this, bpp, pokeIndex, dest);
         const bool eligible = mega::targetCharizardMegaForm(bpp) > 0;
-        mega::gMegaArmed = eligible;
-        mega::syncGimmickUiVisuals(__this, eligible, mega::gMegaArmed);
+        // Set FLAG_MEGA_EVOLUTION_UNAVAILABLE before Orig so Lumi's SetGimmickIconsFromFlags
+        // displays the Mega Evolution icon ONLY for eligible Pokémon.
+        FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
+
+        Orig(__this, bpp, pokeIndex, dest);
+
+        mega::gMegaArmed = false;
+        mega::syncGimmickUiVisuals(__this, eligible, false);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
-        Orig(__this);
         const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
-        mega::gMegaArmed = eligible;
-        mega::syncGimmickUiVisuals(__this, eligible, mega::gMegaArmed);
+        FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
+
+        Orig(__this);
+
+        mega::gMegaArmed = false;
+        mega::syncGimmickUiVisuals(__this, eligible, false);
     }
 };
 
@@ -486,12 +552,11 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
         Orig(__this, deltaTime);
         if (__this != nullptr && __this->fields._IsFocus_k__BackingField) {
-            mega::pollMegaToggleInput(__this);
+            mega::handleMegaToggleAfterOrig(__this, false);
         }
     }
 };
 
-// ABI-safe trampoline on BUIWazaList::OnSubmit (0x01d2c6e0) to tag bit 34 on _destActionParam.
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
         Orig(__this);
@@ -500,7 +565,7 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
         }
         auto* destActionParam = __this->fields._destActionParam;
         if (destActionParam != nullptr &&
-            mega::gMegaArmed &&
+            (mega::gMegaArmed || mega::isGimmickIconActive(__this)) &&
             mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0) {
             destActionParam->fields.value.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
         }
@@ -517,7 +582,7 @@ HOOK_DEFINE_TRAMPOLINE(BUIActionList$$OnUpdate) {
         Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
         if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
             core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
-            mega::pollMegaToggleInput(core->fields._UISystem_k__BackingField->fields._wazaList);
+            mega::handleMegaToggleAfterOrig(core->fields._UISystem_k__BackingField->fields._wazaList, true);
         }
     }
 };
@@ -547,6 +612,7 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
             auto* container = reinterpret_cast<Dpr::Battle::Logic::SectionContainer::Object*>(
                 __this->fields.m_pSectionContainer);
             mega::executeCharizardMegaEvolution(container, pokeAction);
+            mega::gMegaUsedThisBattle = true;
             FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, true);
             return;
         }
@@ -638,10 +704,9 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isSymbol, bool isMitu, System::String::Object* overlapBgm, int32_t overlapSetupEffectId,
                          bool isCantUseBall) {
         mega::gMegaArmed = false;
-        FlagWork::SetFlag(
-            FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
-            isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI
-        );
+        mega::gMegaUsedThisBattle = false;
+        mega::gMegaBattleAllowed = !(isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
+        FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, iPtrEnemyParty, arenaID, mapAttrib, weatherType, isSwim, isFishing, partnerID,
              isCaptureDemo, safariBallNum, isSymbol, isMitu, overlapBgm, overlapSetupEffectId, isCantUseBall);
     }
@@ -652,11 +717,10 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
                          int32_t mapAttrib, int32_t weatherType, int32_t rule, int32_t enemyID0, int32_t enemyID1,
                          int32_t partnerID) {
         mega::gMegaArmed = false;
-        FlagWork::SetFlag(
-            FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
-            rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
-            rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID)
-        );
+        mega::gMegaUsedThisBattle = false;
+        mega::gMegaBattleAllowed = !(rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
+                                     rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID));
+        FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, arenaID, mapAttrib, weatherType, rule, enemyID0, enemyID1, partnerID);
     }
 };
@@ -668,7 +732,6 @@ void installPostInitHooks() {
     }
     gPostInitHooksInstalled = true;
 
-    ItemWork$$GetItemData::InstallAtOffset(0x01aea840);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
