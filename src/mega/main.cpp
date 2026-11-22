@@ -3,6 +3,7 @@
 #include "externals/BTL_STRID_SET.h"
 #include "externals/FlagWork.h"
 #include "externals/FlagWork_Enums.h"
+#include "externals/GameController.h"
 #include "externals/ItemWork.h"
 #include "externals/PlayerWork.h"
 #include "externals/Dpr/Battle/Logic/ActPri.h"
@@ -23,15 +24,18 @@
 #include "externals/Dpr/Battle/Logic/Section_FromEvent_Message.h"
 #include "externals/Dpr/Battle/Logic/Section_ProcessActionCore.h"
 #include "externals/Dpr/Battle/Logic/Section_StoreActions.h"
+#include "externals/Dpr/Battle/View/BattleViewCore.h"
+#include "externals/Dpr/Battle/View/BtlvInput.h"
 #include "externals/Dpr/Battle/View/Systems/BattleViewSystem.h"
+#include "externals/Dpr/Battle/View/UI/BUIWazaButton.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
-#include "externals/Dpr/Item/ItemInfo.h"
+#include "externals/Pml/Item/ItemData.h"
 #include "externals/Pml/PokeParty.h"
 #include "externals/System/String.h"
+#include "externals/UnityEngine/Color.h"
 #include "externals/UnityEngine/Component.h"
 #include "externals/UnityEngine/GameObject.h"
 #include "externals/UnityEngine/Transform.h"
-#include "externals/XLSXContent/ItemTable.h"
 
 #include <cstdint>
 
@@ -41,16 +45,19 @@ constexpr int kBaseForm = 0;
 constexpr int kMegaXForm = 1;
 constexpr int kMegaYForm = 2;
 
-// Indices from this fork's data headers; validated against Lumi 2.2F RomFS.
-constexpr int kCharcoal = 249;      // Reference holdable item in Items pocket
-constexpr int kTownMap = 442;       // Reference key item in Key Items pocket
-constexpr int kCharizarditeX = 660;
-constexpr int kCharizarditeY = 678;
-constexpr int kMegaRing = 696;
-constexpr int kKeyStone = 773;
+// Verified indices from src/mod/data/items.h.
+constexpr uint16_t kFireStone = 82;       // Guaranteed BDSP stone icon sprite
+constexpr uint16_t kOddKeystone = 111;    // Guaranteed BDSP keystone icon sprite
+constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket
+constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (F_FUNC = 0)
+constexpr uint16_t kCharizarditeX = 660;
+constexpr uint16_t kCharizarditeY = 678;
+constexpr uint16_t kMegaRing = 696;
+constexpr uint16_t kKeyStone = 773;
 constexpr int kToughClaws = 181;
 constexpr int kDrought = 70;
 
+constexpr uint32_t kSeUiSelect = 0xb7533038;
 constexpr uint64_t kMegaFlagBit = 34;
 constexpr uint64_t kMegaFlagMask = 1ULL << kMegaFlagBit;
 
@@ -90,11 +97,13 @@ static_assert(kMegaX.hp == 78 && kMegaY.hp == 78);
 static_assert(kMegaX.primaryType == 9 && kMegaX.secondaryType == 15);
 static_assert(kMegaY.primaryType == 9 && kMegaY.secondaryType == 2);
 
-inline bool isMegaStone(int32_t itemId) {
+bool gMegaArmed = false;
+
+inline bool isMegaStone(uint16_t itemId) {
     return itemId == kCharizarditeX || itemId == kCharizarditeY;
 }
 
-inline bool isMegaKeyItem(int32_t itemId) {
+inline bool isMegaKeyItem(uint16_t itemId) {
     return itemId == kKeyStone || itemId == kMegaRing;
 }
 
@@ -143,46 +152,88 @@ inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* po
     );
 }
 
-inline bool isMegaToggleActive(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+inline void syncGimmickUiVisuals(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList, bool eligible, bool armed) {
+    if (wazaList == nullptr) {
+        return;
+    }
+
+    auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
+    if (rootTransform != nullptr) {
+        auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton"));
+        if (gimmickButton != nullptr) {
+            if (auto* btnGo = reinterpret_cast<UnityEngine::Component::Object*>(gimmickButton)->get_gameObject(); btnGo != nullptr) {
+                btnGo->SetActive(eligible);
+            }
+            if (auto* gimmicks = gimmickButton->Find(System::String::Create("Gimmicks")); gimmicks != nullptr) {
+                if (auto* megaIcon = gimmicks->Find(System::String::Create("MegaIcon")); megaIcon != nullptr) {
+                    if (auto* megaGo = reinterpret_cast<UnityEngine::Component::Object*>(megaIcon)->get_gameObject(); megaGo != nullptr) {
+                        megaGo->SetActive(eligible);
+                    }
+                    if (auto* activeTf = megaIcon->Find(System::String::Create("Active")); activeTf != nullptr) {
+                        if (auto* activeGo = reinterpret_cast<UnityEngine::Component::Object*>(activeTf)->get_gameObject(); activeGo != nullptr) {
+                            activeGo->SetActive(eligible && armed);
+                        }
+                    }
+                }
+            } else if (gimmickButton->get_childCount() > 0) {
+                if (auto* stateTf = gimmickButton->GetChild(0); stateTf != nullptr) {
+                    if (auto* stateGo = reinterpret_cast<UnityEngine::Component::Object*>(stateTf)->get_gameObject(); stateGo != nullptr) {
+                        stateGo->SetActive(eligible && armed);
+                    }
+                }
+            }
+        }
+    }
+
+    // Visual fallback that works on both Lumi and vanilla battle UIs: tint move text gold when Mega is armed.
+    if (wazaList->fields._wazaButtons != nullptr) {
+        const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.2f, .a = 1.0f };
+        const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
+        const uint64_t count = wazaList->fields._wazaButtons->max_length;
+        for (uint64_t i = 0; i < count; ++i) {
+            auto* btn = wazaList->fields._wazaButtons->m_Items[i];
+            if (btn != nullptr && btn->fields._text != nullptr) {
+                btn->fields._text->virtual_set_color((eligible && armed) ? armedColor : normalColor);
+            }
+        }
+    }
+}
+
+inline bool isGimmickIconActive(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
     if (wazaList == nullptr) {
         return false;
     }
     auto* rootTransform = reinterpret_cast<UnityEngine::Component::Object*>(wazaList)->get_transform();
     if (rootTransform == nullptr) {
-        return true;
+        return false;
     }
 
-    // Lumi Madrid UI places the toggle under GimmickButton/Gimmicks/MegaIcon/Active.
     auto* gimmickButton = rootTransform->Find(System::String::Create("GimmickButton"));
-    if (gimmickButton != nullptr) {
-        auto* gimmicks = gimmickButton->Find(System::String::Create("Gimmicks"));
-        if (gimmicks != nullptr) {
-            auto* megaIcon = gimmicks->Find(System::String::Create("MegaIcon"));
-            if (megaIcon != nullptr) {
-                auto* megaIconGo = reinterpret_cast<UnityEngine::Component::Object*>(megaIcon)->get_gameObject();
-                if (megaIconGo == nullptr || !megaIconGo->get_activeSelf()) {
-                    return false;
-                }
-                auto* activeTf = megaIcon->Find(System::String::Create("Active"));
-                if (activeTf != nullptr) {
-                    auto* activeGo = reinterpret_cast<UnityEngine::Component::Object*>(activeTf)->get_gameObject();
-                    return activeGo != nullptr && activeGo->get_activeSelf();
-                }
+    if (gimmickButton == nullptr) {
+        return false;
+    }
+
+    if (auto* gimmicks = gimmickButton->Find(System::String::Create("Gimmicks")); gimmicks != nullptr) {
+        if (auto* megaIcon = gimmicks->Find(System::String::Create("MegaIcon")); megaIcon != nullptr) {
+            auto* megaIconGo = reinterpret_cast<UnityEngine::Component::Object*>(megaIcon)->get_gameObject();
+            if (megaIconGo == nullptr || !megaIconGo->get_activeSelf()) {
+                return false;
             }
-        }
-        // Vanilla-style GimmickButton fallback: child 0 active state.
-        if (gimmickButton->get_childCount() > 0) {
-            auto* stateTf = gimmickButton->GetChild(0);
-            if (stateTf != nullptr) {
-                auto* stateGo = reinterpret_cast<UnityEngine::Component::Object*>(stateTf)->get_gameObject();
-                return stateGo != nullptr && stateGo->get_activeSelf();
+            if (auto* activeTf = megaIcon->Find(System::String::Create("Active")); activeTf != nullptr) {
+                auto* activeGo = reinterpret_cast<UnityEngine::Component::Object*>(activeTf)->get_gameObject();
+                return activeGo != nullptr && activeGo->get_activeSelf();
             }
         }
         return false;
     }
 
-    // If no GimmickButton exists in the active UI prefab, allow eligible Charizard to Mega Evolve.
-    return true;
+    if (gimmickButton->get_childCount() > 0) {
+        if (auto* stateTf = gimmickButton->GetChild(0); stateTf != nullptr) {
+            auto* stateGo = reinterpret_cast<UnityEngine::Component::Object*>(stateTf)->get_gameObject();
+            return stateGo != nullptr && stateGo->get_activeSelf();
+        }
+    }
+    return false;
 }
 
 void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* container,
@@ -229,63 +280,97 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
 }
 } // namespace mega
 
-HOOK_DEFINE_TRAMPOLINE(ItemWork$$GetItemData) {
-    static XLSXContent::ItemTable::SheetItem::Object* Callback(uint16_t id) {
-        auto* data = Orig(id);
-        if (data == nullptr) {
-            return nullptr;
-        }
-        if (mega::isMegaStone(id)) {
-            if (auto* ref = Orig(mega::kCharcoal); ref != nullptr) {
-                data->fields.type = ref->fields.type;
-                data->fields.group = ref->fields.group;
-                data->fields.group_id = ref->fields.group_id;
-                data->fields.fld_pocket = ref->fields.fld_pocket;
-                data->fields.field_func = ref->fields.field_func;
-                data->fields.battle_func = ref->fields.battle_func;
-                data->fields.flags0 = ref->fields.flags0;
-                if (data->fields.iconid <= 0) {
-                    data->fields.iconid = ref->fields.iconid;
-                }
+// Read-only parameter delegation for Mega Stones and Key Stone / Mega Ring.
+// Never mutates ItemTable or ItemInfo in place, keeping Bag closing and Y-shortcuts intact.
+HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
+    static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID) {
+        using PrmID = Pml::Item::ItemData::PrmID;
+
+        if (mega::isMegaStone(itemno)) {
+            switch (prmID) {
+                case PrmID::ICONID:
+                    return Orig(mega::kFireStone, PrmID::ICONID);
+                case PrmID::F_POCKET:
+                case PrmID::ITEM_TYPE:
+                case PrmID::GROUP:
+                case PrmID::GROUPID:
+                case PrmID::SET_TO_POKE:
+                case PrmID::INACTIVE:
+                    return Orig(mega::kCharcoal, prmID);
+                default:
+                    break;
             }
-        } else if (mega::isMegaKeyItem(id)) {
-            if (auto* ref = Orig(mega::kTownMap); ref != nullptr) {
-                data->fields.type = ref->fields.type;
-                data->fields.group = ref->fields.group;
-                data->fields.group_id = ref->fields.group_id;
-                data->fields.fld_pocket = ref->fields.fld_pocket;
-                data->fields.flags0 = ref->fields.flags0;
-                if (data->fields.iconid <= 0) {
-                    data->fields.iconid = ref->fields.iconid;
-                }
+        } else if (mega::isMegaKeyItem(itemno)) {
+            switch (prmID) {
+                case PrmID::ICONID:
+                    return Orig(mega::kOddKeystone, PrmID::ICONID);
+                case PrmID::F_POCKET:
+                case PrmID::ITEM_TYPE:
+                case PrmID::GROUP:
+                case PrmID::GROUPID:
+                case PrmID::SET_TO_POKE:
+                case PrmID::INACTIVE:
+                case PrmID::F_FUNC:
+                    return Orig(mega::kMagmaStone, prmID);
+                default:
+                    break;
             }
         }
-        return data;
+
+        return Orig(itemno, prmID);
     }
 };
 
-HOOK_DEFINE_TRAMPOLINE(ItemWork$$GetItemInfo) {
-    static Dpr::Item::ItemInfo::Object* Callback(int32_t itemno) {
-        auto* info = Orig(itemno);
-        if (info == nullptr) {
-            return nullptr;
+HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this,
+                         Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
+                         uint8_t pokeIndex,
+                         Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest) {
+        Orig(__this, bpp, pokeIndex, dest);
+        mega::gMegaArmed = false;
+        const bool eligible = mega::targetCharizardMegaForm(bpp) > 0;
+        mega::syncGimmickUiVisuals(__this, eligible, false);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
+        Orig(__this);
+        mega::gMegaArmed = false;
+        const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
+        mega::syncGimmickUiVisuals(__this, eligible, false);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
+        Orig(__this, deltaTime);
+
+        if (__this == nullptr || !__this->fields._IsShow_k__BackingField) {
+            return;
         }
-        if (mega::isMegaStone(itemno)) {
-            if (auto* ref = Orig(mega::kCharcoal); ref != nullptr) {
-                info->fields._isDummy = false;
-                info->fields._type = ref->fields._type;
-                info->fields._categoryType = ref->fields._categoryType;
-                info->fields._groupId = ref->fields._groupId;
-            }
-        } else if (mega::isMegaKeyItem(itemno)) {
-            if (auto* ref = Orig(mega::kTownMap); ref != nullptr) {
-                info->fields._isDummy = false;
-                info->fields._type = ref->fields._type;
-                info->fields._categoryType = ref->fields._categoryType;
-                info->fields._groupId = ref->fields._groupId;
+
+        const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
+        if (!eligible) {
+            return;
+        }
+
+        constexpr int32_t kToggleMask =
+            GameController::ButtonMask::L |
+            GameController::ButtonMask::R |
+            GameController::ButtonMask::StickL |
+            GameController::ButtonMask::StickR;
+
+        if (Dpr::Battle::View::BtlvInput::GetPush(kToggleMask, true)) {
+            mega::gMegaArmed = !mega::gMegaArmed;
+            mega::syncGimmickUiVisuals(__this, true, mega::gMegaArmed);
+
+            Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
+            if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
+                core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
+                core->fields._UISystem_k__BackingField->PlaySe(mega::kSeUiSelect);
             }
         }
-        return info;
     }
 };
 
@@ -314,9 +399,10 @@ HOOK_DEFINE_INLINE(OnSubmitWazaButton) {
 
         if (destActionParam != nullptr &&
             mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0 &&
-            mega::isMegaToggleActive(__this)) {
+            (mega::gMegaArmed || mega::isGimmickIconActive(__this))) {
             destActionParam->fields.value.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
         }
+        mega::gMegaArmed = false;
     }
 };
 
@@ -418,6 +504,7 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isSwim, bool isFishing, int32_t partnerID, bool isCaptureDemo, int32_t safariBallNum,
                          bool isSymbol, bool isMitu, System::String::Object* overlapBgm, int32_t overlapSetupEffectId,
                          bool isCantUseBall) {
+        mega::gMegaArmed = false;
         mega::ensureMegaStarterItems();
         FlagWork::SetFlag(
             FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
@@ -432,6 +519,7 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
     static void Callback(Dpr::Battle::Logic::BATTLE_SETUP_PARAM::Object* battleSetupParam, int32_t arenaID,
                          int32_t mapAttrib, int32_t weatherType, int32_t rule, int32_t enemyID0, int32_t enemyID1,
                          int32_t partnerID) {
+        mega::gMegaArmed = false;
         mega::ensureMegaStarterItems();
         FlagWork::SetFlag(
             FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE,
@@ -445,8 +533,10 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
 extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
 
-    ItemWork$$GetItemData::InstallAtOffset(0x01aea840);
-    ItemWork$$GetItemInfo::InstallAtOffset(0x01aea5b0);
+    ItemData$$GetParam::InstallAtOffset(0x0249b950);
+    BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
+    BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
+    BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
     OnSubmitWazaButton::InstallAtOffset(0x01d2cee8);
     CalcActionPriority$$Execute::InstallAtOffset(0x021ad570);
     ProcessActionCore$$action::InstallAtOffset(0x021c0de0);
