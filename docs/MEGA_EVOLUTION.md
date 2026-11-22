@@ -2,6 +2,10 @@
 
 Target: Pokémon Brilliant Diamond 1.3.0 with a **matched** Luminescent Platinum RomFS and this ExLaunch fork. This document is an implementation plan, not a claim that Mega Evolution currently works. [TeamLumi's FAQ](https://luminescent.team/docs/faq) says Megas are research work and are not planned for Lumi. A working Charizard X/Y implementation requires a compatible RomFS content set in addition to ExeFS code. Start with one existing species and one form; Charizard X is a useful test because this tree already has an X/Y form choice.
 
+## Current branch layout
+
+The original Lumi code remains in `src/mod/features/mega_evolution.cpp` and is disabled. This branch adds `src/mega/main.cpp` as a separate `MegaExtension` CMake target that produces `subsdk2`. It currently contains Charizard X/Y stone-to-form selection with compile-time checks. It does **not** yet hook the battle engine or provide the required RomFS forms and models. Do not replace the installed Lumi `subsdk1` or its IPS patch with this artifact. Loader coexistence must be tested before enabling battle hooks.
+
 ## What this fork already contains
 
 - `src/mod/features/mega_evolution.cpp` has a proposed Mega/Ultra Burst implementation, but the entire implementation is inside a block comment, and every `InstallAtOffset` call in `exl_mega_evolution_main()` is commented out. Merely enabling the “Mega Evolution” feature will do nothing.
@@ -16,7 +20,7 @@ Lumi's ExeFS guide explains the Ghidra → header → hook → build → test wo
 
 | Location | Required action |
 | --- | --- |
-| `src/mod/features/mega_evolution.cpp` | Restore and revise the existing implementation in small stages; confirm offsets/signatures and add safety checks. |
+| `src/mega/main.cpp` | Implement verified hooks in the isolated `subsdk2` target; use the disabled Lumi code as a reference only. |
 | `src/mod/data/megas.h` | Add the species ID only if absent. Charizard is already listed. |
 | `src/mod/data/items.h` | Verify stone and Key Stone indices match the installed RomFS data; edit only for genuinely new items and preserve positional IDs. |
 | `src/mod/externals/Dpr/Battle/Logic/*`, `src/mod/externals/Dpr/Battle/View/*` | Update or add only the class/field/method declarations actually needed, from 1.3.0 IL2CPP analysis. Check layout before dereferencing. |
