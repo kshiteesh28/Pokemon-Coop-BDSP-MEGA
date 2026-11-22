@@ -39,6 +39,7 @@ SECTIONS
 
   /* App rodata */
   .rodata : {
+    KEEP (*(.rodata.mod0))
     *(.rodata .rodata.*)
   } :rodata
 
