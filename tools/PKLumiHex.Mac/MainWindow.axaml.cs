@@ -9,6 +9,7 @@ public partial class MainWindow : Window
 {
     private const int CharizarditeX = 660;
     private const int CharizarditeY = 678;
+    private const int MegaRing = 696;
     private const int KeyStone = 773;
 
     private SaveFile? _sav;
@@ -472,11 +473,12 @@ public partial class MainWindow : Window
 
         UpsertItemInPouch(itemsPouch, CharizarditeX, 1);
         UpsertItemInPouch(itemsPouch, CharizarditeY, 1);
+        UpsertItemInPouch(keyPouch, MegaRing, 1);
         UpsertItemInPouch(keyPouch, KeyStone, 1);
         _sav.Inventory = pouches;
 
         RefreshBagList();
-        BagStatusText.Text = "Added Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
+        BagStatusText.Text = "Added Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
     }
 
     private static bool UpsertItemInPouch(InventoryPouch pouch, int itemId, int count)
