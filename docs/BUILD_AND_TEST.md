@@ -1,6 +1,8 @@
 # Build, package, and test guide
 
-Scope: ExeFS builds from this fork and local testing with a matching Pokémon Brilliant Diamond 1.3.0 + Luminescent Platinum RomFS setup. See [MEGA_EVOLUTION.md](MEGA_EVOLUTION.md) for the feature work.
+Scope: ExeFS builds from this fork and local testing with a matching Pokémon Brilliant Diamond 1.3.0 + Luminescent Platinum RomFS setup.
+
+**Compatibility finding for the current local install:** `Luminescent Platinum 2.2F BD` contains `exefs/subsdk1` and `exefs/94CEAE325C205C4B9D6F7235552F28FD.ips`. This source tree's `config.cmake.template` sets module ID 9, so its Ryujinx artifact is not yet a verified drop-in replacement. The installed 2.2F RomFS has no `Data/ExtraData` directory, although the disabled Mega implementation expects `Data/ExtraData/Features/features.json` and `Data/ExtraData/NotDoing/RequiredItem.json`. Resolve code/content version and loader compatibility before replacing the working install. See [MEGA_EVOLUTION.md](MEGA_EVOLUTION.md) for the feature work.
 
 ## Record the baseline first
 
