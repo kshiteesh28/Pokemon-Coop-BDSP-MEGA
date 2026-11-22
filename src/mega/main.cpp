@@ -44,6 +44,7 @@ static_assert(charizardMegaForm(6, 0, kCharizarditeY, kCharizarditeX, kCharizard
 static_assert(charizardMegaForm(6, 0, 679, kCharizarditeX, kCharizarditeY, true, false) == -1);
 static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, false, false) == -1);
 static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, true, true) == -1);
+static_assert(kKeyStone == 773);
 static_assert(kMegaX.ability == kToughClaws && kMegaY.ability == kDrought);
 static_assert(kMegaX.hp == 78 && kMegaY.hp == 78);
 static_assert(kMegaX.primaryType == 9 && kMegaX.secondaryType == 15);
