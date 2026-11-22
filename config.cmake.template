@@ -45,6 +45,7 @@ add_module(
                 include
                 src/mod
                 src/common
+                imgui
         SOURCE src/common/exlaunch/
                src/mega/
 )
