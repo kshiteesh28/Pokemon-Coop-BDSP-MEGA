@@ -52,6 +52,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mega_subsdk2_ryujinx_${{ matrix.build_type }}
-          path: build/MegaExtension_releases/ryujinx/
+          path: build/MegaExtension_releases/ryujinx/mods/contents/0100000011D90000/MegaExtension/exefs/subsdk2
           if-no-files-found: error
           retention-days: 14
