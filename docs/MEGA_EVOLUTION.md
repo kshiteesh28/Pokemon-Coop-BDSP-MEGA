@@ -1,6 +1,6 @@
 # Mega Evolution implementation guide
 
-Target: Pokémon Brilliant Diamond 1.3.0 with a **matched** Luminescent Platinum RomFS and this ExLaunch fork. This document is an implementation plan, not a claim that Mega Evolution currently works. Start with one existing species and one form; Charizard X is a useful test because this tree already has an X/Y form choice.
+Target: Pokémon Brilliant Diamond 1.3.0 with a **matched** Luminescent Platinum RomFS and this ExLaunch fork. This document is an implementation plan, not a claim that Mega Evolution currently works. [TeamLumi's FAQ](https://luminescent.team/docs/faq) says Megas are research work and are not planned for Lumi. A working Charizard X/Y implementation requires a compatible RomFS content set in addition to ExeFS code. Start with one existing species and one form; Charizard X is a useful test because this tree already has an X/Y form choice.
 
 ## What this fork already contains
 
