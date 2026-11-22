@@ -44,8 +44,7 @@ add_module(
                 include/game
                 include
                 src/mod
-        SOURCE src/common/
-               src/common/exlaunch/
+        SOURCE src/common/exlaunch/
                src/mega/
 )
 add_module_variant(
