@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
     branches:
-      - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -52,6 +52,14 @@ jobs:
         with:
           name: exefs_release
           path: build_release/RomBase_releases/atmosphere/
+          if-no-files-found: error
+
+      - name: Upload Ryujinx Release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: exefs_ryujinx_release
+          path: build_release/RomBase_releases/ryujinx/
+          if-no-files-found: error
 
       # -------------------------
       # Debug build
@@ -76,6 +84,14 @@ jobs:
         with:
           name: exefs_debug
           path: build_debug/RomBase_releases/atmosphere/
+          if-no-files-found: error
+
+      - name: Upload Ryujinx Debug artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: exefs_ryujinx_debug
+          path: build_debug/RomBase_releases/ryujinx/
+          if-no-files-found: error
 
   release:
     name: Create Nightly Release
