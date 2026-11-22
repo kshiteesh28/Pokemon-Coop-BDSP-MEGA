@@ -17,9 +17,77 @@ public partial class MainWindow : Window
     private bool _isPartySelected = true;
     private int _selectedBox;
 
+    private List<string> _speciesChoices = new();
+    private List<string> _itemChoices = new();
+    private List<string> _moveChoices = new();
+    private List<string> _abilityChoices = new();
+
     public MainWindow()
     {
         InitializeComponent();
+        PopulateLookupLists();
+    }
+
+    private void PopulateLookupLists()
+    {
+        _speciesChoices = BuildChoiceList(GameInfo.Strings.Species);
+        _itemChoices = BuildChoiceList(GameInfo.Strings.Item);
+        _moveChoices = BuildChoiceList(GameInfo.Strings.Move);
+        _abilityChoices = BuildChoiceList(GameInfo.Strings.Ability);
+
+        SpeciesAutoBox.ItemsSource = _speciesChoices;
+        HeldItemAutoBox.ItemsSource = _itemChoices;
+        BagItemAutoBox.ItemsSource = _itemChoices;
+        AbilityAutoBox.ItemsSource = _abilityChoices;
+
+        Move1AutoBox.ItemsSource = _moveChoices;
+        Move2AutoBox.ItemsSource = _moveChoices;
+        Move3AutoBox.ItemsSource = _moveChoices;
+        Move4AutoBox.ItemsSource = _moveChoices;
+    }
+
+    private static List<string> BuildChoiceList(IReadOnlyList<string> source)
+    {
+        var list = new List<string>(source.Count);
+        for (int i = 0; i < source.Count; i++)
+        {
+            var name = string.IsNullOrWhiteSpace(source[i]) ? $"#{i}" : source[i];
+            list.Add($"{name} ({i})");
+        }
+        return list;
+    }
+
+    private static string FormatChoice(IReadOnlyList<string> source, int id)
+    {
+        if (id >= 0 && id < source.Count && !string.IsNullOrWhiteSpace(source[id]))
+            return $"{source[id]} ({id})";
+        return $"#{id} ({id})";
+    }
+
+    private static bool TryParseChoiceId(string? text, IReadOnlyList<string> source, out int id)
+    {
+        id = 0;
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.Trim();
+        if (int.TryParse(trimmed, out id))
+            return true;
+
+        int open = trimmed.LastIndexOf('(');
+        int close = trimmed.LastIndexOf(')');
+        if (open >= 0 && close > open + 1 && int.TryParse(trimmed.Substring(open + 1, close - open - 1), out id))
+            return true;
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            if (string.Equals(source[i], trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                id = i;
+                return true;
+            }
+        }
+        return false;
     }
 
     private async void OnOpenClick(object? sender, RoutedEventArgs e)
@@ -53,7 +121,7 @@ public partial class MainWindow : Window
             MainTabs.IsEnabled = true;
 
             LoadSaveIntoUi();
-            StatusText.Text = $"Loaded {Path.GetFileName(path)} ({sav.Version}, Gen {sav.Generation}, OT: {sav.OT})";
+            StatusText.Text = $"{Path.GetFileName(path)}  •  {sav.Version} (Gen {sav.Generation})  •  OT: {sav.OT}";
         }
         catch (Exception ex)
         {
@@ -74,7 +142,7 @@ public partial class MainWindow : Window
 
             var bytes = _sav.Write();
             await File.WriteAllBytesAsync(_savePath, bytes);
-            StatusText.Text = $"Saved to {Path.GetFileName(_savePath)} (backup: {Path.GetFileName(backupPath)})";
+            StatusText.Text = $"Saved {Path.GetFileName(_savePath)} (backup saved to {Path.GetFileName(backupPath)})";
         }
         catch (Exception ex)
         {
@@ -114,21 +182,21 @@ public partial class MainWindow : Window
         if (_sav is null)
             return;
 
-        var containers = new List<string> { "Party" };
+        var containers = new List<string> { "Party (6)" };
         for (int b = 0; b < _sav.BoxCount; b++)
             containers.Add($"Box {b + 1}");
 
         ContainerPicker.ItemsSource = containers;
         ContainerPicker.SelectedIndex = 0;
 
-        var pockets = _sav.Inventory.Select((p, idx) => $"{idx}: {p.Type}").ToList();
+        var pockets = _sav.Inventory.Select((p, idx) => $"{p.Type} ({idx})").ToList();
         PocketPicker.ItemsSource = pockets;
         if (pockets.Count > 0)
             PocketPicker.SelectedIndex = 0;
 
         TrainerNameBox.Text = _sav.OT;
-        MoneyBox.Text = _sav.Money.ToString();
-        LanguageBox.Text = _sav.Language.ToString();
+        MoneySpinner.Value = _sav.Money;
+        LanguageSpinner.Value = _sav.Language;
         VersionText.Text = $"{_sav.Version} (Gen {_sav.Generation})";
     }
 
@@ -165,12 +233,13 @@ public partial class MainWindow : Window
     private static string FormatSlot(int index, PKM pk)
     {
         if (pk.Species == 0)
-            return $"[{index + 1:00}] (Empty)";
+            return $"{index + 1:00}  —  Empty";
 
         var speciesName = GetSpeciesName(pk.Species);
-        var itemSuffix = pk.HeldItem > 0 ? $" @ {GetItemName(pk.HeldItem)}" : string.Empty;
-        var formSuffix = pk.Form > 0 ? $"-F{pk.Form}" : string.Empty;
-        return $"[{index + 1:00}] {speciesName}{formSuffix} Lv.{pk.CurrentLevel}{itemSuffix}";
+        var shiny = pk.IsShiny ? " ★" : string.Empty;
+        var formSuffix = pk.Form > 0 ? $" (Form {pk.Form})" : string.Empty;
+        var itemSuffix = pk.HeldItem > 0 ? $"  •  {GetItemName(pk.HeldItem)}" : string.Empty;
+        return $"{index + 1:00}  {speciesName}{formSuffix}{shiny}  Lv.{pk.CurrentLevel}{itemSuffix}";
     }
 
     private void OnSlotSelected(object? sender, SelectionChangedEventArgs e)
@@ -183,50 +252,76 @@ public partial class MainWindow : Window
             ? _sav.GetPartySlotAtIndex(_selectedSlot)
             : _sav.GetBoxSlotAtIndex(_selectedBox, _selectedSlot);
 
-        SlotHeader.Text = _isPartySelected
-            ? $"Party Slot {_selectedSlot + 1} — {GetSpeciesName(pk.Species)}"
-            : $"Box {_selectedBox + 1} Slot {_selectedSlot + 1} — {GetSpeciesName(pk.Species)}";
+        var location = _isPartySelected ? $"Party Slot {_selectedSlot + 1}" : $"Box {_selectedBox + 1}, Slot {_selectedSlot + 1}";
+        SlotHeader.Text = pk.Species == 0 ? $"{location} — Empty" : $"{GetSpeciesName(pk.Species)} (Lv. {pk.CurrentLevel})";
+        SlotSubheader.Text = pk.Species == 0
+            ? "Pick a species below and click Apply Changes to create a Pokémon here."
+            : $"{location}  •  Held: {(pk.HeldItem > 0 ? GetItemName(pk.HeldItem) : "None")}";
 
+        SpeciesAutoBox.Text = FormatChoice(GameInfo.Strings.Species, pk.Species);
         NicknameBox.Text = pk.Nickname;
-        SpeciesBox.Text = pk.Species.ToString();
-        FormBox.Text = pk.Form.ToString();
-        LevelBox.Text = pk.CurrentLevel.ToString();
-        HeldItemBox.Text = pk.HeldItem.ToString();
-        HeldItemNameText.Text = GetItemName(pk.HeldItem);
+        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, pk.HeldItem);
+        AbilityAutoBox.Text = FormatChoice(GameInfo.Strings.Ability, pk.Ability);
+        LevelSpinner.Value = Math.Clamp(pk.CurrentLevel, 1, 100);
+        FormSpinner.Value = pk.Form;
         ShinyCheck.IsChecked = pk.IsShiny;
-        AbilityBox.Text = pk.Ability.ToString();
 
-        Move1Box.Text = pk.Move1.ToString();
-        Move2Box.Text = pk.Move2.ToString();
-        Move3Box.Text = pk.Move3.ToString();
-        Move4Box.Text = pk.Move4.ToString();
+        Move1AutoBox.Text = FormatChoice(GameInfo.Strings.Move, pk.Move1);
+        Move2AutoBox.Text = FormatChoice(GameInfo.Strings.Move, pk.Move2);
+        Move3AutoBox.Text = FormatChoice(GameInfo.Strings.Move, pk.Move3);
+        Move4AutoBox.Text = FormatChoice(GameInfo.Strings.Move, pk.Move4);
 
-        IvHpBox.Text = pk.IV_HP.ToString();
-        IvAtkBox.Text = pk.IV_ATK.ToString();
-        IvDefBox.Text = pk.IV_DEF.ToString();
-        IvSpaBox.Text = pk.IV_SPA.ToString();
-        IvSpdBox.Text = pk.IV_SPD.ToString();
-        IvSpeBox.Text = pk.IV_SPE.ToString();
+        IvHpSpinner.Value = pk.IV_HP;
+        IvAtkSpinner.Value = pk.IV_ATK;
+        IvDefSpinner.Value = pk.IV_DEF;
+        IvSpaSpinner.Value = pk.IV_SPA;
+        IvSpdSpinner.Value = pk.IV_SPD;
+        IvSpeSpinner.Value = pk.IV_SPE;
 
-        EvHpBox.Text = pk.EV_HP.ToString();
-        EvAtkBox.Text = pk.EV_ATK.ToString();
-        EvDefBox.Text = pk.EV_DEF.ToString();
-        EvSpaBox.Text = pk.EV_SPA.ToString();
-        EvSpdBox.Text = pk.EV_SPD.ToString();
-        EvSpeBox.Text = pk.EV_SPE.ToString();
+        EvHpSpinner.Value = pk.EV_HP;
+        EvAtkSpinner.Value = pk.EV_ATK;
+        EvDefSpinner.Value = pk.EV_DEF;
+        EvSpaSpinner.Value = pk.EV_SPA;
+        EvSpdSpinner.Value = pk.EV_SPD;
+        EvSpeSpinner.Value = pk.EV_SPE;
+        UpdateEvTotal();
         PokemonStatusText.Text = string.Empty;
     }
 
     private void OnGiveCharizarditeX(object? sender, RoutedEventArgs e)
     {
-        HeldItemBox.Text = CharizarditeX.ToString();
-        HeldItemNameText.Text = GetItemName(CharizarditeX);
+        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, CharizarditeX);
+        PokemonStatusText.Text = "Selected Charizardite X — click Apply Changes to Slot.";
     }
 
     private void OnGiveCharizarditeY(object? sender, RoutedEventArgs e)
     {
-        HeldItemBox.Text = CharizarditeY.ToString();
-        HeldItemNameText.Text = GetItemName(CharizarditeY);
+        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, CharizarditeY);
+        PokemonStatusText.Text = "Selected Charizardite Y — click Apply Changes to Slot.";
+    }
+
+    private void OnMaxIvsClick(object? sender, RoutedEventArgs e)
+    {
+        IvHpSpinner.Value = 31;
+        IvAtkSpinner.Value = 31;
+        IvDefSpinner.Value = 31;
+        IvSpaSpinner.Value = 31;
+        IvSpdSpinner.Value = 31;
+        IvSpeSpinner.Value = 31;
+    }
+
+    private void OnEvChanged(object? sender, NumericUpDownValueChangedEventArgs e) => UpdateEvTotal();
+
+    private void UpdateEvTotal()
+    {
+        int total =
+            (int)(EvHpSpinner.Value ?? 0) +
+            (int)(EvAtkSpinner.Value ?? 0) +
+            (int)(EvDefSpinner.Value ?? 0) +
+            (int)(EvSpaSpinner.Value ?? 0) +
+            (int)(EvSpdSpinner.Value ?? 0) +
+            (int)(EvSpeSpinner.Value ?? 0);
+        EvTotalText.Text = $"EV Total: {total} / 510";
     }
 
     private void OnApplyPokemonClick(object? sender, RoutedEventArgs e)
@@ -240,40 +335,38 @@ public partial class MainWindow : Window
                 ? _sav.GetPartySlotAtIndex(_selectedSlot)
                 : _sav.GetBoxSlotAtIndex(_selectedBox, _selectedSlot);
 
-            if (ushort.TryParse(SpeciesBox.Text, out var species))
-                pk.Species = species;
-            if (byte.TryParse(FormBox.Text, out var form))
-                pk.Form = form;
-            if (int.TryParse(LevelBox.Text, out var level))
-                pk.CurrentLevel = Math.Clamp(level, 1, 100);
-            if (int.TryParse(HeldItemBox.Text, out var heldItem))
-                pk.HeldItem = Math.Max(0, heldItem);
+            if (TryParseChoiceId(SpeciesAutoBox.Text, GameInfo.Strings.Species, out var species) && species >= 0)
+                pk.Species = (ushort)species;
+            if (TryParseChoiceId(HeldItemAutoBox.Text, GameInfo.Strings.Item, out var heldItem) && heldItem >= 0)
+                pk.HeldItem = heldItem;
+            if (TryParseChoiceId(AbilityAutoBox.Text, GameInfo.Strings.Ability, out var ability) && ability >= 0)
+                pk.Ability = ability;
+
+            pk.Form = (byte)Math.Clamp((int)(FormSpinner.Value ?? 0), 0, 64);
+            pk.CurrentLevel = Math.Clamp((int)(LevelSpinner.Value ?? 1), 1, 100);
             if (!string.IsNullOrWhiteSpace(NicknameBox.Text))
                 pk.Nickname = NicknameBox.Text.Trim();
-            if (int.TryParse(AbilityBox.Text, out var ability))
-                pk.Ability = Math.Max(0, ability);
-
             pk.SetIsShiny(ShinyCheck.IsChecked == true);
 
-            if (ushort.TryParse(Move1Box.Text, out var m1)) pk.Move1 = m1;
-            if (ushort.TryParse(Move2Box.Text, out var m2)) pk.Move2 = m2;
-            if (ushort.TryParse(Move3Box.Text, out var m3)) pk.Move3 = m3;
-            if (ushort.TryParse(Move4Box.Text, out var m4)) pk.Move4 = m4;
+            if (TryParseChoiceId(Move1AutoBox.Text, GameInfo.Strings.Move, out var m1) && m1 >= 0) pk.Move1 = (ushort)m1;
+            if (TryParseChoiceId(Move2AutoBox.Text, GameInfo.Strings.Move, out var m2) && m2 >= 0) pk.Move2 = (ushort)m2;
+            if (TryParseChoiceId(Move3AutoBox.Text, GameInfo.Strings.Move, out var m3) && m3 >= 0) pk.Move3 = (ushort)m3;
+            if (TryParseChoiceId(Move4AutoBox.Text, GameInfo.Strings.Move, out var m4) && m4 >= 0) pk.Move4 = (ushort)m4;
             pk.HealPP();
 
-            if (int.TryParse(IvHpBox.Text, out var ivHp)) pk.IV_HP = Math.Clamp(ivHp, 0, 31);
-            if (int.TryParse(IvAtkBox.Text, out var ivAtk)) pk.IV_ATK = Math.Clamp(ivAtk, 0, 31);
-            if (int.TryParse(IvDefBox.Text, out var ivDef)) pk.IV_DEF = Math.Clamp(ivDef, 0, 31);
-            if (int.TryParse(IvSpaBox.Text, out var ivSpa)) pk.IV_SPA = Math.Clamp(ivSpa, 0, 31);
-            if (int.TryParse(IvSpdBox.Text, out var ivSpd)) pk.IV_SPD = Math.Clamp(ivSpd, 0, 31);
-            if (int.TryParse(IvSpeBox.Text, out var ivSpe)) pk.IV_SPE = Math.Clamp(ivSpe, 0, 31);
+            pk.IV_HP = Math.Clamp((int)(IvHpSpinner.Value ?? 0), 0, 31);
+            pk.IV_ATK = Math.Clamp((int)(IvAtkSpinner.Value ?? 0), 0, 31);
+            pk.IV_DEF = Math.Clamp((int)(IvDefSpinner.Value ?? 0), 0, 31);
+            pk.IV_SPA = Math.Clamp((int)(IvSpaSpinner.Value ?? 0), 0, 31);
+            pk.IV_SPD = Math.Clamp((int)(IvSpdSpinner.Value ?? 0), 0, 31);
+            pk.IV_SPE = Math.Clamp((int)(IvSpeSpinner.Value ?? 0), 0, 31);
 
-            if (int.TryParse(EvHpBox.Text, out var evHp)) pk.EV_HP = Math.Clamp(evHp, 0, 252);
-            if (int.TryParse(EvAtkBox.Text, out var evAtk)) pk.EV_ATK = Math.Clamp(evAtk, 0, 252);
-            if (int.TryParse(EvDefBox.Text, out var evDef)) pk.EV_DEF = Math.Clamp(evDef, 0, 252);
-            if (int.TryParse(EvSpaBox.Text, out var evSpa)) pk.EV_SPA = Math.Clamp(evSpa, 0, 252);
-            if (int.TryParse(EvSpdBox.Text, out var evSpd)) pk.EV_SPD = Math.Clamp(evSpd, 0, 252);
-            if (int.TryParse(EvSpeBox.Text, out var evSpe)) pk.EV_SPE = Math.Clamp(evSpe, 0, 252);
+            pk.EV_HP = Math.Clamp((int)(EvHpSpinner.Value ?? 0), 0, 252);
+            pk.EV_ATK = Math.Clamp((int)(EvAtkSpinner.Value ?? 0), 0, 252);
+            pk.EV_DEF = Math.Clamp((int)(EvDefSpinner.Value ?? 0), 0, 252);
+            pk.EV_SPA = Math.Clamp((int)(EvSpaSpinner.Value ?? 0), 0, 252);
+            pk.EV_SPD = Math.Clamp((int)(EvSpdSpinner.Value ?? 0), 0, 252);
+            pk.EV_SPE = Math.Clamp((int)(EvSpeSpinner.Value ?? 0), 0, 252);
 
             pk.RefreshChecksum();
 
@@ -285,7 +378,7 @@ public partial class MainWindow : Window
             int keepSlot = _selectedSlot;
             RefreshSlotList();
             SlotList.SelectedIndex = keepSlot;
-            PokemonStatusText.Text = "Slot updated (remember to Save).";
+            PokemonStatusText.Text = "Applied! Click Save (+ .bak) in the top bar to write to disk.";
         }
         catch (Exception ex)
         {
@@ -295,29 +388,40 @@ public partial class MainWindow : Window
 
     private void OnPocketChanged(object? sender, SelectionChangedEventArgs e) => RefreshBagList();
 
+    private void OnBagFilterChanged(object? sender, TextChangedEventArgs e) => RefreshBagList();
+
     private void RefreshBagList()
     {
         if (_sav is null || PocketPicker.SelectedIndex < 0)
             return;
 
+        var filter = BagFilterBox.Text?.Trim() ?? string.Empty;
         var pouch = _sav.Inventory[PocketPicker.SelectedIndex];
         var rows = new List<string>();
         foreach (var item in pouch.Items)
         {
-            if (item.Index > 0 && item.Count > 0)
-                rows.Add($"#{item.Index} {GetItemName(item.Index)} x{item.Count}");
+            if (item.Index <= 0 || item.Count <= 0)
+                continue;
+
+            var label = $"{GetItemName(item.Index)} ({item.Index})  ×{item.Count}";
+            if (string.IsNullOrEmpty(filter) || label.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                rows.Add(label);
         }
         BagItemList.ItemsSource = rows;
     }
 
     private void OnBagItemSelected(object? sender, SelectionChangedEventArgs e)
     {
-        if (BagItemList.SelectedItem is not string text || !text.StartsWith('#'))
+        if (BagItemList.SelectedItem is not string text)
             return;
 
-        var parts = text.Split(' ');
-        if (parts.Length > 0 && int.TryParse(parts[0].TrimStart('#'), out var id))
-            BagItemIdBox.Text = id.ToString();
+        int timesIdx = text.LastIndexOf("×");
+        if (timesIdx > 0 && int.TryParse(text.Substring(timesIdx + 1).Trim(), out var count))
+            BagItemCountSpinner.Value = count;
+
+        var itemPart = timesIdx > 0 ? text.Substring(0, timesIdx).Trim() : text;
+        if (TryParseChoiceId(itemPart, GameInfo.Strings.Item, out var id))
+            BagItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, id);
     }
 
     private void OnAddBagItemClick(object? sender, RoutedEventArgs e)
@@ -325,13 +429,13 @@ public partial class MainWindow : Window
         if (_sav is null || PocketPicker.SelectedIndex < 0)
             return;
 
-        if (!int.TryParse(BagItemIdBox.Text, out var itemId) || itemId <= 0 ||
-            !int.TryParse(BagItemCountBox.Text, out var count) || count < 0)
+        if (!TryParseChoiceId(BagItemAutoBox.Text, GameInfo.Strings.Item, out var itemId) || itemId <= 0)
         {
-            BagStatusText.Text = "Enter a valid Item ID and Count.";
+            BagStatusText.Text = "Pick a valid item name or ID.";
             return;
         }
 
+        int count = Math.Max(0, (int)(BagItemCountSpinner.Value ?? 1));
         var pouches = _sav.Inventory;
         var pouch = pouches[PocketPicker.SelectedIndex];
         if (!UpsertItemInPouch(pouch, itemId, count))
@@ -342,7 +446,13 @@ public partial class MainWindow : Window
 
         _sav.Inventory = pouches;
         RefreshBagList();
-        BagStatusText.Text = $"Set #{itemId} ({GetItemName(itemId)}) x{count} (remember to Save).";
+        BagStatusText.Text = $"Updated {GetItemName(itemId)} ({itemId}) ×{count}. Click Save to write.";
+    }
+
+    private void OnRemoveBagItemClick(object? sender, RoutedEventArgs e)
+    {
+        BagItemCountSpinner.Value = 0;
+        OnAddBagItemClick(sender, e);
     }
 
     private void OnGrantMegaKitClick(object? sender, RoutedEventArgs e)
@@ -366,7 +476,7 @@ public partial class MainWindow : Window
         _sav.Inventory = pouches;
 
         RefreshBagList();
-        BagStatusText.Text = "Added Key Stone (773), Charizardite X (660), and Charizardite Y (678).";
+        BagStatusText.Text = "Added Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
     }
 
     private static bool UpsertItemInPouch(InventoryPouch pouch, int itemId, int count)
@@ -380,6 +490,9 @@ public partial class MainWindow : Window
                 existing.Index = 0;
             return true;
         }
+
+        if (clamped == 0)
+            return true;
 
         var empty = pouch.Items.FirstOrDefault(i => i.Index == 0 || i.Count == 0);
         if (empty is null)
@@ -397,12 +510,10 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(TrainerNameBox.Text))
             _sav.OT = TrainerNameBox.Text.Trim();
-        if (uint.TryParse(MoneyBox.Text, out var money))
-            _sav.Money = money;
-        if (int.TryParse(LanguageBox.Text, out var lang))
-            _sav.Language = lang;
+        _sav.Money = (uint)Math.Clamp((long)(MoneySpinner.Value ?? 0), 0, 9999999);
+        _sav.Language = Math.Clamp((int)(LanguageSpinner.Value ?? 2), 1, 10);
 
-        TrainerStatusText.Text = "Trainer info updated (remember to Save).";
+        TrainerStatusText.Text = "Trainer info applied! Click Save (+ .bak) to write.";
     }
 
     private static string GetSpeciesName(ushort species)
