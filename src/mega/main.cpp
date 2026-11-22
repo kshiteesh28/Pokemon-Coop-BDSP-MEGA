@@ -24,11 +24,11 @@ constexpr int charizardMegaForm(int species, int originalForm,
     return -1;
 }
 
-static_assert(charizardMegaForm(6, 0, 660, 660, 661, true, false) == 1);
-static_assert(charizardMegaForm(6, 0, 661, 660, 661, true, false) == 2);
-static_assert(charizardMegaForm(6, 0, 662, 660, 661, true, false) == -1);
-static_assert(charizardMegaForm(6, 0, 660, 660, 661, false, false) == -1);
-static_assert(charizardMegaForm(6, 0, 660, 660, 661, true, true) == -1);
+static_assert(charizardMegaForm(6, 0, 1001, 1001, 1002, true, false) == 1);
+static_assert(charizardMegaForm(6, 0, 1002, 1001, 1002, true, false) == 2);
+static_assert(charizardMegaForm(6, 0, 1003, 1001, 1002, true, false) == -1);
+static_assert(charizardMegaForm(6, 0, 1001, 1001, 1002, false, false) == -1);
+static_assert(charizardMegaForm(6, 0, 1001, 1001, 1002, true, true) == -1);
 }
 
 // Hook installation will be added after the game ABI, loader coexistence,
