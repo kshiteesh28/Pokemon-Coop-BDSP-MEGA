@@ -307,22 +307,20 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     }
 
     auto* bpp = wazaList->fields._btlPokeParam;
-    if (bpp->GetMonsNo() != kCharizardSpecies || bpp->GetFormNo() != kBaseForm || gMegaUsedThisBattle) {
-        return;
-    }
-
-    const uint16_t held = bpp->GetItem();
-    const bool hasStone = isMegaStone(held);
+    const bool isBaseCharizard = (bpp->GetMonsNo() == kCharizardSpecies && bpp->GetFormNo() == kBaseForm);
+    const bool hasStone = isMegaStone(bpp->GetItem());
     const bool hasRing = hasMegaAccessoryInBag();
     const int targetForm = targetCharizardMegaForm(bpp);
     const bool eligible = targetForm > 0;
 
-    // Style the visible button pill right above the moves (_wazaDescriptionButton / _yButtonText)
-    // as a prominent Ultra-Sun-style Mega Evolution toggle button when Charizard is eligible.
+    // Always display the Mega Evolution button pill in every battle:
+    // - Active & choosable (cyan -> magenta-gold) only when the Pokémon can Mega Evolve and Mega Ring is in Bag.
+    // - Visible but dimmed/inactive (grey) for all other Pokémon or when Mega Ring / Stone is missing.
     if (wazaList->fields._yButtonText != nullptr) {
         auto* promptText = reinterpret_cast<Dpr::UI::UIText::Object*>(wazaList->fields._yButtonText);
-        const char* label = nullptr;
+        const char* label = "MEGA EVOLVE (OFF)";
         UnityEngine::Color::Object textColor{};
+        textColor.fields = { .r = 0.65f, .g = 0.65f, .b = 0.70f, .a = 1.0f };
 
         if (eligible && gMegaArmed) {
             label = (targetForm == kMegaXForm) ? "MEGA X ACTIVE" : "MEGA Y ACTIVE";
@@ -330,39 +328,42 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
         } else if (eligible) {
             label = (targetForm == kMegaXForm) ? "[R] MEGA EVOLVE X" : "[R] MEGA EVOLVE Y";
             textColor.fields = { .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f };
-        } else if (!hasStone) {
-            label = "Need Charizardite";
-            textColor.fields = { .r = 0.85f, .g = 0.85f, .b = 0.85f, .a = 1.0f };
-        } else if (!hasRing) {
-            label = "Need Mega Ring";
+        } else if (isBaseCharizard && hasStone && !hasRing && !gMegaUsedThisBattle) {
+            label = "MEGA (Need Ring)";
             textColor.fields = { .r = 1.0f, .g = 0.65f, .b = 0.35f, .a = 1.0f };
+        } else if (gMegaUsedThisBattle) {
+            label = "MEGA USED";
+            textColor.fields = { .r = 0.65f, .g = 0.65f, .b = 0.70f, .a = 1.0f };
         }
 
-        if (label != nullptr) {
-            promptText->virtual_set_text(System::String::Create(label));
-            promptText->virtual_set_color(textColor);
-        }
+        promptText->virtual_set_text(System::String::Create(label));
+        promptText->virtual_set_color(textColor);
     }
 
-    if (eligible && wazaList->fields._wazaDescriptionButton != nullptr) {
+    if (wazaList->fields._wazaDescriptionButton != nullptr) {
         auto* descBtn = reinterpret_cast<Dpr::Battle::View::UI::BUIButtonBase::Object*>(
             wazaList->fields._wazaDescriptionButton);
         if (descBtn->fields._backgroundImage != nullptr) {
-            UnityEngine::Color::Fields bgColor = gMegaArmed
-                ? UnityEngine::Color::Fields{ .r = 0.95f, .g = 0.18f, .b = 0.58f, .a = 1.0f }
-                : UnityEngine::Color::Fields{ .r = 0.12f, .g = 0.62f, .b = 0.95f, .a = 1.0f };
+            UnityEngine::Color::Fields bgColor{};
+            if (eligible && gMegaArmed) {
+                bgColor = { .r = 0.95f, .g = 0.18f, .b = 0.58f, .a = 1.0f };
+            } else if (eligible) {
+                bgColor = { .r = 0.12f, .g = 0.62f, .b = 0.95f, .a = 1.0f };
+            } else {
+                bgColor = { .r = 0.30f, .g = 0.30f, .b = 0.34f, .a = 0.85f };
+            }
             descBtn->fields._backgroundImage->virtual_set_color(bgColor);
         }
     }
 
-    if (eligible && wazaList->fields._wazaButtons != nullptr) {
+    if (wazaList->fields._wazaButtons != nullptr) {
         const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.12f, .a = 1.0f };
         const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
         const uint64_t count = wazaList->fields._wazaButtons->max_length;
         for (uint64_t i = 0; i < count; ++i) {
             auto* btn = wazaList->fields._wazaButtons->m_Items[i];
             if (btn != nullptr && btn->fields._text != nullptr) {
-                btn->fields._text->virtual_set_color(gMegaArmed ? armedColor : normalColor);
+                btn->fields._text->virtual_set_color((eligible && gMegaArmed) ? armedColor : normalColor);
             }
         }
     }
