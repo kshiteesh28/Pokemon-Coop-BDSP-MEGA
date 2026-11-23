@@ -441,7 +441,8 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         }
         // Activate Drought (Harsh Sunlight = weather 1, 5 turns) directly on FieldStatus for Mega Charizard Y.
         if (targetForm == kMegaYForm && msgSec->fields.m_pBattleEnv != nullptr) {
-            auto* fieldStatus = msgSec->fields.m_pBattleEnv->fields.m_fieldStatus;
+            auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(msgSec->fields.m_pBattleEnv);
+            auto* fieldStatus = battleEnv->fields.m_fieldStatus;
             if (fieldStatus != nullptr && fieldStatus->fields.m_data != nullptr) {
                 fieldStatus->fields.m_data->fields.weather = 1; // BTL_WEATHER_SHINE
                 fieldStatus->fields.m_data->fields.weatherTurn = 5;
