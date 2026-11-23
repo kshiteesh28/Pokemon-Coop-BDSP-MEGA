@@ -332,7 +332,7 @@ inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* po
     );
 }
 
-inline UnityEngine::GameObject::Object* findMegaActiveObject(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+inline UnityEngine::GameObject* findMegaActiveObject(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
     if (wazaList == nullptr) {
         return nullptr;
     }
