@@ -1,0 +1,5 @@
+# PKLumiHex.Mac build outputs and upstream clone
+tools/PKLumiHex-upstream/
+tools/PKLumiHex.Mac/dist/
+tools/PKLumiHex.Mac/bin/
+tools/PKLumiHex.Mac/obj/
