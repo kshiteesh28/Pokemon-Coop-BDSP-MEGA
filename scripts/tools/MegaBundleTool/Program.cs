@@ -364,12 +364,39 @@ internal static class Program
         var mergedIdx = new int[4];
         var mergedW = new float[4];
 
+        int idxLArm = vanNameToIdx.TryGetValue("LArm", out int lai) ? lai : -1;
+        int idxLForeArm = vanNameToIdx.TryGetValue("LForeArm", out int lfai) ? lfai : -1;
+        int idxLHand = vanNameToIdx.TryGetValue("LHand", out int lhi) ? lhi : -1;
+        int idxRArm = vanNameToIdx.TryGetValue("RArm", out int rai) ? rai : -1;
+        int idxRForeArm = vanNameToIdx.TryGetValue("RForeArm", out int rfai) ? rfai : -1;
+        int idxRHand = vanNameToIdx.TryGetValue("RHand", out int rhi) ? rhi : -1;
+
         for (int v = 0; v < vCount; v++)
         {
             int po = posBase + v * posStride;
             float vx = BitConverter.ToSingle(raw, po) * s + tx;
             float vy = BitConverter.ToSingle(raw, po + 4) * s + ty;
             float vz = BitConverter.ToSingle(raw, po + 8) * s + tz;
+
+            // Mega Charizard X (pm0006_01_00) was sculpted in T-pose (horizontal outstretched arms).
+            // Smoothly bend its arms down & forward around BDSP's shoulders into Charizard's battle stance!
+            bool isMegaXArm = false;
+            bool isMegaXLeftArm = false;
+            float origAbsX = MathF.Abs(vx);
+            if (formId == "pm0006_01_00" && origAbsX > 0.22f && vy > 0.62f && vy < 1.06f && vz > 0.02f)
+            {
+                isMegaXArm = true;
+                isMegaXLeftArm = vx < 0f;
+                float sign = isMegaXLeftArm ? -1f : 1f;
+                float blend = Math.Clamp((origAbsX - 0.22f) / 0.14f, 0f, 1f);
+                var pivot = new Vector3(sign * 0.22f, 0.88f, 0.08f);
+                var rel = new Vector3(vx, vy, vz) - pivot;
+                var qDown = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, sign * 0.62f * blend);
+                var qFwd = Quaternion.CreateFromAxisAngle(Vector3.UnitY, -sign * 0.60f * blend);
+                var posedArm = Vector3.Transform(rel, qDown * qFwd) + pivot;
+                vx = posedArm.X; vy = posedArm.Y; vz = posedArm.Z;
+            }
+
             Array.Copy(BitConverter.GetBytes(vx), 0, raw, po, 4);
             Array.Copy(BitConverter.GetBytes(vy), 0, raw, po + 4, 4);
             Array.Copy(BitConverter.GetBytes(vz), 0, raw, po + 8, 4);
@@ -389,12 +416,25 @@ internal static class Program
                 if (wk <= 1e-6f) continue;
                 int target = (ik >= 0 && ik < mapToVanilla.Length) ? mapToVanilla[ik] : fallbackRootIdx;
 
-                // Per-form hygiene: guard Mega Charizard X's mouth-flames against nearest-surface wing/arm bleed
-                if (formId == "pm0006_01_00" && vanHeadIdx >= 0 && vy > 1.10f && vz > 0.25f && MathF.Abs(vx) < 0.48f)
+                // Per-form hygiene for unrigged Mega Charizard X:
+                // 1) Strictly bind Head + Horns + Mouth Flames to Head, zero wing/arm bleed.
+                // 2) Strictly bind Arms to LArm/LForeArm/LHand (or R equivalents), zero wing bleed.
+                if (formId == "pm0006_01_00")
                 {
-                    string bn = vanBoneNames[target];
-                    if (bn.Contains("Feeler") || bn.Contains("Arm") || bn.Contains("Hand") || bn.Contains("Finger"))
-                        target = vanHeadIdx;
+                    if (vanHeadIdx >= 0 && vy > 1.04f && vz > 0.10f && MathF.Abs(vx) < 0.58f)
+                    {
+                        string bn = vanBoneNames[target];
+                        if (bn.Contains("Feeler") || bn.Contains("Arm") || bn.Contains("Hand") || bn.Contains("Finger") || bn.Contains("Shoulder"))
+                            target = vanHeadIdx;
+                    }
+                    else if (isMegaXArm && idxLArm >= 0 && idxRArm >= 0)
+                    {
+                        float dist = origAbsX - 0.22f;
+                        if (isMegaXLeftArm)
+                            target = dist > 0.28f && idxLHand >= 0 ? idxLHand : (dist > 0.14f && idxLForeArm >= 0 ? idxLForeArm : idxLArm);
+                        else
+                            target = dist > 0.28f && idxRHand >= 0 ? idxRHand : (dist > 0.14f && idxRForeArm >= 0 ? idxRForeArm : idxRArm);
+                    }
                 }
 
                 int found = -1;

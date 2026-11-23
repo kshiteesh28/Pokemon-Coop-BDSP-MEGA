@@ -164,6 +164,19 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
     out.extend(new_path_arrays)
     out.append(0x0B)  # NRBF MessageEnd
 
+    # Update existing Message/english record size in-place if overridden in romfs-delta
+    msg_en = delta_root / "Message" / "english"
+    if msg_en.exists():
+        m_marker = b"\x07Message\x06\x1e:\x01\x00\x07english"
+        m_idx = out.find(m_marker)
+        if m_idx != -1:
+            # After string: RecordedHash(25) + DateTime(8) + bool(1) + allDeps(5) + assetPaths(5) = 44 bytes -> int64 size
+            sz_pos = m_idx + len(m_marker) + 44
+            old_sz = struct.unpack_from("<q", out, sz_pos)[0]
+            new_sz = msg_en.stat().st_size
+            struct.pack_into("<q", out, sz_pos, new_sz)
+            print(f"Updated message/english size in Dpr.bin ({old_sz:,} -> {new_sz:,})")
+
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(out)
     print(f"Wrote {output} ({len(out):,} bytes, records: {orig_count} -> {new_count})")

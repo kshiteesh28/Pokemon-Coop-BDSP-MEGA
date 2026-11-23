@@ -17,7 +17,9 @@
 #include "externals/Dpr/Battle/Logic/PokeActionCategory.h"
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
+#include "externals/Dpr/Battle/Logic/BattleEnv.h"
 #include "externals/Dpr/Battle/Logic/Section.h"
+#include "externals/Dpr/Battle/Logic/ServerCommandPutter.h"
 #include "externals/Dpr/Battle/Logic/SectionContainer.h"
 #include "externals/Dpr/Battle/Logic/Section_CalcActionPriority.h"
 #include "externals/Dpr/Battle/Logic/Section_FromEvent_FormChange.h"
@@ -422,11 +424,31 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
     container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
 
-    // Apply the Mega form's new Ability and display its activation banner after evolution completes.
+    // Apply the Mega form's new Ability across BTL_POKEPARAM, CoreParam/Accessor, and BattleView client cache.
     const uint16_t megaAbility = static_cast<uint16_t>(targetForm == kMegaXForm ? kToughClaws : kDrought);
     param->fields.m_tokusei = megaAbility;
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
+    }
+    if (auto* srcPoke = param->GetSrcData(); srcPoke != nullptr && srcPoke->fields.m_accessor != nullptr) {
+        srcPoke->fields.m_accessor->SetTokuseiNo(megaAbility);
+    }
+
+    auto* msgSec = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(container->fields.m_section_FromEvent_Message);
+    if (msgSec != nullptr) {
+        if (msgSec->fields.m_pServerCmdPutter != nullptr) {
+            msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
+        }
+        // Activate Drought (Harsh Sunlight = weather 1, 5 turns) directly on FieldStatus for Mega Charizard Y.
+        if (targetForm == kMegaYForm && msgSec->fields.m_pBattleEnv != nullptr) {
+            auto* fieldStatus = msgSec->fields.m_pBattleEnv->fields.m_fieldStatus;
+            if (fieldStatus != nullptr && fieldStatus->fields.m_data != nullptr) {
+                fieldStatus->fields.m_data->fields.weather = 1; // BTL_WEATHER_SHINE
+                fieldStatus->fields.m_data->fields.weatherTurn = 5;
+                fieldStatus->fields.m_data->fields.weatherTurnCount = 0;
+                fieldStatus->fields.m_data->fields.weatherCausePokeID = param->GetID();
+            }
+        }
     }
 
     auto* abilityDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
@@ -449,6 +471,33 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
             mega::patchItemTableInMemory();
         }
         return Orig(itemno, prmID);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
+    static int32_t Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this,
+                            Dpr::Battle::Logic::BTL_POKEPARAM::ValueID vid) {
+        if (__this != nullptr &&
+            (vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI ||
+             vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI_EFFECTIVE)) {
+            if (__this->GetMonsNo() == mega::kCharizardSpecies) {
+                const uint8_t form = __this->GetFormNo();
+                if (form == mega::kMegaXForm) return mega::kToughClaws;
+                if (form == mega::kMegaYForm) return mega::kDrought;
+            }
+        }
+        return Orig(__this, vid);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
+    static uint16_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            const uint16_t form = __this->GetFormNo();
+            if (form == mega::kMegaXForm) return static_cast<uint16_t>(mega::kToughClaws);
+            if (form == mega::kMegaYForm) return static_cast<uint16_t>(mega::kDrought);
+        }
+        return Orig(__this);
     }
 };
 
@@ -781,6 +830,8 @@ void installSharedPostInitHooks() {
     }
     gPostInitHooksInstalled = true;
 
+    BTL_POKEPARAM$$GetValue::InstallAtOffset(0x01fdd010);
+    CoreParam$$GetTokuseiNo::InstallAtOffset(0x020488a0);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
