@@ -447,10 +447,10 @@ HOOK_DEFINE_TRAMPOLINE(CheckUnbreakablePokeItem) {
 
 HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     static XLSXContent::PokemonInfo::SheetCatalog::Object* Callback(
-        int32_t monsNo, int32_t formNo, Pml::Sex sex, bool isRare, bool isEgg) {
+        int32_t monsNo, int32_t formNo, Pml::Sex sex, bool isRare, bool isEgg, const void* methodInfo) {
         if (monsNo == mega::kCharizardSpecies &&
             (formNo == mega::kMegaXForm || formNo == mega::kMegaYForm)) {
-            auto* base = Orig(monsNo, mega::kBaseForm, sex, isRare, isEgg);
+            auto* base = Orig(monsNo, mega::kBaseForm, sex, isRare, isEgg, methodInfo);
             if (base != nullptr && base->klass != nullptr) {
                 auto* clone = reinterpret_cast<XLSXContent::PokemonInfo::SheetCatalog::Object*>(
                     il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
@@ -467,7 +467,7 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
                 }
             }
         }
-        return Orig(monsNo, formNo, sex, isRare, isEgg);
+        return Orig(monsNo, formNo, sex, isRare, isEgg, methodInfo);
     }
 };
 
@@ -754,6 +754,7 @@ void installSharedPostInitHooks() {
     gPostInitHooksInstalled = true;
 
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
+    DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
@@ -765,7 +766,6 @@ extern "C" void exl_main(void*, void*) {
 
     // Install non-conflicting Battle & ItemData hooks immediately so they are always active.
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
-    DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);

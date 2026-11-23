@@ -103,12 +103,19 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
             raise ValueError(f"Duplicate assetBundleName already in Dpr.bin: {bundle_name}")
         seen_paths.add(key)
 
-    # Allocate fresh object IDs well above existing positive IDs in Dpr.bin
-    next_id = 0x20000000
-    next_neg_id = -0x20000000
+    # Locate end of AssetBundleRecord block (right after last record id=25063, before first ArraySingleString 0x11)
+    first_arr_marker = b"\x11\x4e\x62\x00\x00"
+    records_block_end = data.find(first_arr_marker)
+    if records_block_end == -1:
+        raise ValueError("Could not locate end of AssetBundleRecord block in Dpr.bin")
+
+    # Use clean sequential IDs immediately above vanilla's max positive ID (0x042e9a) and below min negative ID (-150450)
+    next_id = 0x00042F00
+    next_neg_id = -200000
 
     new_refs = bytearray()
-    new_records = bytearray()
+    new_record_objs = bytearray()
+    new_path_arrays = bytearray()
 
     for bundle_name, asset_path, deps_id in entries:
         bundle_file = delta_root / "Pokemon Database" / bundle_name
@@ -126,23 +133,24 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
         # Add MemberReference into _records[]
         new_refs.extend(b"\x09" + struct.pack("<I", rec_id))
 
-        # ClassWithId(AssetBundleRecord, metadataId=6)
-        new_records.extend(b"\x01" + struct.pack("<II", rec_id, RECORD_METADATA_ID))
-        new_records.extend(encode_binary_string(proj_str_id, "Pokemon Database"))
-        new_records.extend(encode_binary_string(name_str_id, bundle_name))
+        # ClassWithId(AssetBundleRecord, metadataId=6) placed inside the AssetBundleRecord block
+        new_record_objs.extend(b"\x01" + struct.pack("<II", rec_id, RECORD_METADATA_ID))
+        new_record_objs.extend(encode_binary_string(proj_str_id, "Pokemon Database"))
+        new_record_objs.extend(encode_binary_string(name_str_id, bundle_name))
         # Inline RecordedHash ClassWithId (16 zero bytes)
-        new_records.extend(b"\x01" + struct.pack("<iI", hash_obj_id, HASH_METADATA_ID) + b"\x00" * 16)
+        new_record_objs.extend(b"\x01" + struct.pack("<iI", hash_obj_id, HASH_METADATA_ID) + b"\x00" * 16)
         # DateTime (8 bytes) + bool isStreamingSceneAssetBundle (0)
-        new_records.extend(battle_datetime + b"\x00")
+        new_record_objs.extend(battle_datetime + b"\x00")
         # MemberReference allDependencies + MemberReference assetPaths
-        new_records.extend(b"\x09" + struct.pack("<I", deps_id))
-        new_records.extend(b"\x09" + struct.pack("<I", paths_arr_id))
+        new_record_objs.extend(b"\x09" + struct.pack("<I", deps_id))
+        new_record_objs.extend(b"\x09" + struct.pack("<I", paths_arr_id))
         # int64 size
-        new_records.extend(struct.pack("<q", file_size))
-        # Define the referenced assetPaths ArraySingleString
-        new_records.extend(encode_array_single_string(paths_arr_id, path_str_id, asset_path.lower()))
+        new_record_objs.extend(struct.pack("<q", file_size))
 
-        print(f"Registered {bundle_name} (size={file_size:,}, asset={asset_path}, deps_id=0x{deps_id:x})")
+        # Place referenced assetPaths ArraySingleString in the ArraySingleString section at the end
+        new_path_arrays.extend(encode_array_single_string(paths_arr_id, path_str_id, asset_path.lower()))
+
+        print(f"Registered {bundle_name} (rec_id=0x{rec_id:x}, size={file_size:,}, asset={asset_path}, deps_id=0x{deps_id:x})")
 
     new_count = orig_count + len(entries)
     out = bytearray()
@@ -150,8 +158,10 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
     out.extend(struct.pack("<I", new_count))
     out.extend(data[RECORDS_LEN_OFFSET + 4 : array_end])
     out.extend(new_refs)
-    out.extend(data[array_end:-1])  # everything up to (excluding) final MessageEnd 0x0B
-    out.extend(new_records)
+    out.extend(data[array_end:records_block_end])
+    out.extend(new_record_objs)
+    out.extend(data[records_block_end:-1])
+    out.extend(new_path_arrays)
     out.append(0x0B)  # NRBF MessageEnd
 
     output.parent.mkdir(parents=True, exist_ok=True)
