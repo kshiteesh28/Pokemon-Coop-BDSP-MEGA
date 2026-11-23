@@ -34,6 +34,28 @@ add_module_variant(
 #         "Pokemon Shining Pearl"
 # )
 
+
+# Standalone Mega extension. Build this target to get subsdk2 without
+# compiling Lumi's subsdk9 hook suite into a second module.
+add_module(
+        2
+        MegaExtension
+        INCLUDE include/nn
+                include/game
+                include
+                src/mod
+                src/common
+                imgui
+        SOURCE src/common/exlaunch/
+               src/mega/
+)
+add_module_variant(
+        MegaExtension
+        Diamond
+        0100000011D90000
+        "Pokemon Brilliant Diamond"
+)
+
 # Extra cmake code
 add_compile_definitions(
     DIAMOND=0x0100000011D90000

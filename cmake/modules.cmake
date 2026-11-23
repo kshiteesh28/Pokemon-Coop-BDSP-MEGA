@@ -95,7 +95,9 @@ function(add_module_variant module variant title_id game)
 
     add_executable(${variant} ${ALL_SOURCE} ${PARENT_SOURCE})
     target_include_directories(${variant} PUBLIC ${ALL_INCLUDE} ${PARENT_INCLUDE})
-    target_embed_binaries(${variant} ${ALL_EMBED_BINARIES} ${PARENT_EMBED_BINARIES})
+    if(ALL_EMBED_BINARIES OR PARENT_EMBED_BINARIES)
+        target_embed_binaries(${variant} ${ALL_EMBED_BINARIES} ${PARENT_EMBED_BINARIES})
+    endif()
 
     string(LENGTH ${module} MODULE_NAME_LEN)
     target_compile_definitions(
