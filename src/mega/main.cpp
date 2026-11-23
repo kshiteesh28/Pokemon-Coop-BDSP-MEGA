@@ -412,7 +412,7 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     formDesc->fields.formNo = static_cast<uint8_t>(targetForm);
     formDesc->fields.isDontResetFormByOut = true;
     formDesc->fields.isEnableInCaseOfDead = false;
-    formDesc->fields.isDisplayTokuseiWindow = true;
+    formDesc->fields.isDisplayTokuseiWindow = false;
     formDesc->fields.isDisplayChangeEffect = true;
     formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
     formDesc->fields.successMessage->AddArg(param->GetID());
