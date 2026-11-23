@@ -18,6 +18,7 @@
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
 #include "externals/Dpr/Battle/Logic/BattleEnv.h"
+#include "externals/Dpr/Battle/Logic/BattleProc.h"
 #include "externals/Dpr/Battle/Logic/EventID.h"
 #include "externals/Dpr/Battle/Logic/EventVar.h"
 #include "externals/Dpr/Battle/Logic/EventSystem.h"
@@ -119,6 +120,41 @@ bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
 int gActiveMegaForm = 0;
 bool gInMegaTokuseiSwap = false;
+uint16_t gPreMegaTokusei = 66; // Saved dynamically before Mega Evolution (default Blaze)
+uint8_t gMegaBattlePokeID = 0xFF;
+
+inline bool isBattleEnded() {
+    auto* procClass = Dpr::Battle::Logic::BattleProc::getClass();
+    if (procClass == nullptr || procClass->static_fields == nullptr) {
+        return true;
+    }
+    return procClass->static_fields->_isEnd || !procClass->static_fields->_isInitialized;
+}
+
+inline void revertMegaFormInParty() {
+    PlayerWork::getClass()->initIfNeeded();
+    if (auto* party = PlayerWork::get_playerParty(); party != nullptr) {
+        const uint32_t count = party->fields.m_memberCount;
+        for (uint32_t i = 0; i < count && i < 6; ++i) {
+            auto* member = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(party->GetMemberPointer(i));
+            if (member == nullptr || member->IsNull()) {
+                continue;
+            }
+            if (member->GetMonsNo() == kCharizardSpecies) {
+                const uint16_t form = member->GetFormNo();
+                if (form == kMegaXForm || form == kMegaYForm) {
+                    member->ChangeFormNo(kBaseForm, nullptr);
+                    if (member->fields.m_accessor != nullptr) {
+                        member->fields.m_accessor->SetTokuseiNo(gPreMegaTokusei);
+                    }
+                }
+            }
+        }
+    }
+    gActiveMegaForm = 0;
+    gMegaArmed = false;
+    gMegaBattlePokeID = 0xFF;
+}
 
 struct Il2CppFieldInfo {
     const char* name;
@@ -224,12 +260,16 @@ inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID
         reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
     }
 
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", pokeID);
+    // Pass BTL_POKEID_NULL (31) for userPokeID so ChangeTokusei only targets pokeID and never
+    // shows a duplicate user+target ability banner.
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", 31);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "targetPokeID", pokeID);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
     writeFieldIfPresent<int32_t>(descObj, descClass, "tokusei", static_cast<int32_t>(nextTokusei));
     writeFieldIfPresent<bool>(descObj, descClass, "isSameTokuseiEnable", true);
     writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", false);
+    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", false);
+    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayEffect", false);
     writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", true);
     writeFieldIfPresent<bool>(descObj, descClass, "isNotDisplayMessage", true);
 
@@ -237,6 +277,62 @@ inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID
     reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
         sectionChangeTokusei, resObj, &descObj, execMethod);
     gInMegaTokuseiSwap = false;
+    return true;
+}
+
+// Dynamically invokes BDSP's native Section_FromEvent_ChangeWeather::Execute so weather abilities
+// (Drought = 1 Harsh Sunlight, Drizzle = 2 Rain, Sand Stream = 4 Sandstorm, Snow Warning = 8 Snow)
+// show exactly ONE ability banner, brighten/animate the 3D battlefield identically to Sunny Day,
+// and apply the real 5-turn weather field effect.
+inline bool invokeNativeChangeWeather(void* sectionChangeWeather, uint8_t pokeID, uint8_t weather, uint8_t turn) {
+    if (sectionChangeWeather == nullptr) {
+        return false;
+    }
+    auto* secObj = reinterpret_cast<Il2CppObject*>(sectionChangeWeather);
+    Il2CppClass* secClass = secObj->klass;
+    if (secClass == nullptr) {
+        return false;
+    }
+
+    Il2CppClass* descClass = findNestedClassByName(secClass, "Description");
+    Il2CppClass* resClass = findNestedClassByName(secClass, "Result");
+    const MethodInfo* execMethod = findMethodByName(secClass, "Execute", 2);
+    if (descClass == nullptr || resClass == nullptr || execMethod == nullptr) {
+        return false;
+    }
+
+    if ((descClass->_2.bitflags2 >> 1 & 1) && (descClass->_2.cctor_finished == 0)) {
+        il2cpp_runtime_class_init(descClass);
+    }
+    if ((resClass->_2.bitflags2 >> 1 & 1) && (resClass->_2.cctor_finished == 0)) {
+        il2cpp_runtime_class_init(resClass);
+    }
+
+    void* descObj = il2cpp_object_new(descClass);
+    void* resObj = il2cpp_object_new(resClass);
+    if (descObj == nullptr || resObj == nullptr) {
+        return false;
+    }
+
+    if (const MethodInfo* descCtor = findMethodByName(descClass, ".ctor", 0); descCtor != nullptr) {
+        reinterpret_cast<void(*)(void*, const MethodInfo*)>(descCtor->methodPointer)(descObj, descCtor);
+    }
+    if (const MethodInfo* resCtor = findMethodByName(resClass, ".ctor", 0); resCtor != nullptr) {
+        reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
+    }
+
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "weather", weather);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "turn", turn);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "turnUpCount", 0);
+    writeFieldIfPresent<int32_t>(descObj, descClass, "cause", 1); // ChangeWeatherCause::TOKUSEI
+    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", true);
+    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", true);
+    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayEffect", true);
+    writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", false);
+
+    reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
+        sectionChangeWeather, resObj, &descObj, execMethod);
     return true;
 }
 
@@ -515,6 +611,12 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     }
 
     gActiveMegaForm = targetForm;
+    gMegaBattlePokeID = param->GetID();
+    if (auto* srcPoke = param->GetSrcData(); srcPoke != nullptr) {
+        gPreMegaTokusei = srcPoke->GetTokuseiNo();
+    } else {
+        gPreMegaTokusei = param->fields.m_tokusei;
+    }
 
     const uint16_t accessoryId = ownedMegaAccessoryInBag();
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
@@ -568,6 +670,14 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     if (msgSec != nullptr && msgSec->fields.m_pServerCmdPutter != nullptr) {
         msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
+
+    // Trigger real Harsh Sunlight weather (brightens 3D battlefield like Sunny Day + 5-turn weather + 1 Drought banner).
+    if (targetForm == kMegaYForm) {
+        void* weatherSec = container->fields.m_section_FromEvent_ChangeWeather != nullptr
+            ? container->fields.m_section_FromEvent_ChangeWeather
+            : container->fields.m_section_ChangeWeather;
+        invokeNativeChangeWeather(weatherSec, param->GetID(), /*Harsh Sunlight=*/1, /*turns=*/5);
+    }
 }
 } // namespace mega
 
@@ -578,6 +688,9 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         }
         if (!mega::gItemTablePatched) {
             mega::patchItemTableInMemory();
+        }
+        if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
+            mega::revertMegaFormInParty();
         }
         return Orig(itemno, prmID);
     }
@@ -601,7 +714,11 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
 
 HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
     static uint16_t Callback(Pml::PokePara::CoreParam::Object* __this) {
-        if (!mega::gInMegaTokuseiSwap && __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
+            mega::revertMegaFormInParty();
+        }
+        if (!mega::gInMegaTokuseiSwap && mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
+            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
             const uint16_t form = __this->GetFormNo();
             if (form == mega::kMegaXForm) return static_cast<uint16_t>(mega::kToughClaws);
             if (form == mega::kMegaYForm) return static_cast<uint16_t>(mega::kDrought);
@@ -797,6 +914,20 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
             return;
         }
         Orig(__this, pokeAction);
+        // If our Mega Evolved Pokemon fainted during this action, immediately revert it to base form
+        // so its original Fire/Flying type and original Ability (Blaze) are restored right away.
+        if (mega::gActiveMegaForm > 0 && mega::gMegaBattlePokeID != 0xFF && __this != nullptr) {
+            auto* sec = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(__this);
+            if (auto* megaBpp = sec->GetPokeParam(mega::gMegaBattlePokeID); megaBpp != nullptr && megaBpp->IsDead()) {
+                megaBpp->fields.m_formNo = mega::kBaseForm;
+                megaBpp->fields.m_tokusei = mega::gPreMegaTokusei;
+                if (megaBpp->fields.m_coreParam != nullptr) {
+                    megaBpp->fields.m_coreParam->fields.formno = mega::kBaseForm;
+                    megaBpp->fields.m_coreParam->fields.defaultTokusei = mega::gPreMegaTokusei;
+                }
+                mega::revertMegaFormInParty();
+            }
+        }
     }
 };
 
@@ -902,9 +1033,8 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isSwim, bool isFishing, int32_t partnerID, bool isCaptureDemo, int32_t safariBallNum,
                          bool isSymbol, bool isMitu, System::String::Object* overlapBgm, int32_t overlapSetupEffectId,
                          bool isCantUseBall) {
-        mega::gMegaArmed = false;
+        mega::revertMegaFormInParty();
         mega::gMegaUsedThisBattle = false;
-        mega::gActiveMegaForm = 0;
         mega::gMegaBattleAllowed = !(isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, iPtrEnemyParty, arenaID, mapAttrib, weatherType, isSwim, isFishing, partnerID,
@@ -916,9 +1046,8 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
     static void Callback(Dpr::Battle::Logic::BATTLE_SETUP_PARAM::Object* battleSetupParam, int32_t arenaID,
                          int32_t mapAttrib, int32_t weatherType, int32_t rule, int32_t enemyID0, int32_t enemyID1,
                          int32_t partnerID) {
-        mega::gMegaArmed = false;
+        mega::revertMegaFormInParty();
         mega::gMegaUsedThisBattle = false;
-        mega::gActiveMegaForm = 0;
         mega::gMegaBattleAllowed = !(rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
                                      rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID));
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
