@@ -90,14 +90,18 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
 
     entries = [
         ("pokemons/battle/pm0006_01_00", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", BATTLE_DEPS_ID),
-        ("pokemons/battle/pm0006_01_01", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", BATTLE_DEPS_ID),
         ("pokemons/battle/pm0006_02_00", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", BATTLE_DEPS_ID),
-        ("pokemons/battle/pm0006_02_01", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", BATTLE_DEPS_ID),
-        ("pokemons/field/pm0006_01_00", "assets/pokemons/field/pm0006/pm0006_00_00.prefab", field_deps_id),
-        ("pokemons/field/pm0006_01_01", "assets/pokemons/field/pm0006/pm0006_00_00.prefab", field_deps_id),
-        ("pokemons/field/pm0006_02_00", "assets/pokemons/field/pm0006/pm0006_00_00.prefab", field_deps_id),
-        ("pokemons/field/pm0006_02_01", "assets/pokemons/field/pm0006/pm0006_00_00.prefab", field_deps_id),
     ]
+
+    # Guard against AssetBundleDownloadManifest.BuildLookupTables() Dictionary.Add duplicate-key crashes
+    seen_paths = set()
+    for bundle_name, asset_path, _ in entries:
+        key = asset_path.lower().encode("utf-8")
+        if key in seen_paths or data.find(key) != -1:
+            raise ValueError(f"Duplicate assetPath would crash BuildLookupTables(): {asset_path}")
+        if data.find(bundle_name.encode("utf-8")) != -1:
+            raise ValueError(f"Duplicate assetBundleName already in Dpr.bin: {bundle_name}")
+        seen_paths.add(key)
 
     # Allocate fresh object IDs well above existing positive IDs in Dpr.bin
     next_id = 0x20000000

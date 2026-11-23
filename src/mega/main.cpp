@@ -460,8 +460,8 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
                     clone->fields.FormNo = formNo;
                     clone->fields.Rare = isRare;
                     const char* bundleName = (formNo == mega::kMegaXForm)
-                        ? (isRare ? "pm0006_01_01" : "pm0006_01_00")
-                        : (isRare ? "pm0006_02_01" : "pm0006_02_00");
+                        ? "pm0006_01_00"
+                        : "pm0006_02_00";
                     clone->fields.AssetBundleName = System::String::Create(bundleName);
                     return clone;
                 }
