@@ -421,6 +421,22 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     system_load_typeinfo(0x2c56);
     auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
     container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
+
+    // Apply the Mega form's new Ability and display its activation banner after evolution completes.
+    const uint16_t megaAbility = static_cast<uint16_t>(targetForm == kMegaXForm ? kToughClaws : kDrought);
+    param->fields.m_tokusei = megaAbility;
+    if (param->fields.m_coreParam != nullptr) {
+        param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
+    }
+
+    auto* abilityDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
+    abilityDesc->fields.pokeID = param->GetID();
+    abilityDesc->fields.isDisplayTokuseiWindow = true;
+    abilityDesc->fields.message->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo_Y);
+    abilityDesc->fields.message->AddArg(param->GetID());
+
+    auto* abilityResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
+    container->fields.m_section_FromEvent_Message->Execute(abilityResult, &abilityDesc);
 }
 } // namespace mega
 
@@ -496,13 +512,25 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
                                             System::String::Object* label) {
-        if (mega::gActiveMegaForm > 0 && label != nullptr &&
-            (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) &&
-            !mega::utf16ContainsAscii(label, "1572") && !mega::utf16ContainsAscii(label, "start")) {
-            return System::String::Create(
-                mega::gActiveMegaForm == mega::kMegaXForm
-                    ? "Charizard has Mega Evolved into Mega Charizard X!"
-                    : "Charizard has Mega Evolved into Mega Charizard Y!");
+        if (mega::gActiveMegaForm > 0 && label != nullptr) {
+            if (mega::utf16ContainsAscii(label, "1572") || mega::utf16ContainsAscii(label, "megaevostart")) {
+                return System::String::Create(
+                    mega::gActiveMegaForm == mega::kMegaXForm
+                        ? "Charizard's Charizardite X is reacting to your Mega Ring!"
+                        : "Charizard's Charizardite Y is reacting to your Mega Ring!");
+            }
+            if (mega::utf16ContainsAscii(label, "1577") || mega::utf16ContainsAscii(label, "megaevo_y")) {
+                return System::String::Create(
+                    mega::gActiveMegaForm == mega::kMegaXForm
+                        ? "Mega Charizard X's Tough Claws boosts the power of contact moves!"
+                        : "Mega Charizard Y's Drought intensified the sun's rays!");
+            }
+            if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
+                return System::String::Create(
+                    mega::gActiveMegaForm == mega::kMegaXForm
+                        ? "Charizard has Mega Evolved into Mega Charizard X!"
+                        : "Charizard has Mega Evolved into Mega Charizard Y!");
+            }
         }
         if (const char* custom = mega::lookupMegaItemTextByLabel(fileName, label); custom != nullptr) {
             return System::String::Create(custom);
