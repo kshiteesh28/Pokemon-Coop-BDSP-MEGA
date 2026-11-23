@@ -18,7 +18,6 @@
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
 #include "externals/Dpr/Battle/Logic/BattleEnv.h"
-#include "externals/Dpr/Battle/Logic/BattleProc.h"
 #include "externals/Dpr/Battle/Logic/EventID.h"
 #include "externals/Dpr/Battle/Logic/EventVar.h"
 #include "externals/Dpr/Battle/Logic/EventSystem.h"
@@ -124,11 +123,8 @@ uint16_t gPreMegaTokusei = 66; // Saved dynamically before Mega Evolution (defau
 uint8_t gMegaBattlePokeID = 0xFF;
 
 inline bool isBattleEnded() {
-    auto* procClass = Dpr::Battle::Logic::BattleProc::getClass();
-    if (procClass == nullptr || procClass->static_fields == nullptr) {
-        return true;
-    }
-    return procClass->static_fields->_isEnd || !procClass->static_fields->_isInitialized;
+    Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
+    return Dpr::Battle::View::BattleViewCore::get_Instance() == nullptr;
 }
 
 bool gInMegaRevert = false;
@@ -293,62 +289,6 @@ inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID
     reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
         sectionChangeTokusei, resObj, &descObj, execMethod);
     gInMegaTokuseiSwap = false;
-    return true;
-}
-
-// Dynamically invokes BDSP's native Section_FromEvent_ChangeWeather::Execute so weather abilities
-// (Drought = 1 Harsh Sunlight, Drizzle = 2 Rain, Sand Stream = 4 Sandstorm, Snow Warning = 8 Snow)
-// show exactly ONE ability banner, brighten/animate the 3D battlefield identically to Sunny Day,
-// and apply the real 5-turn weather field effect.
-inline bool invokeNativeChangeWeather(void* sectionChangeWeather, uint8_t pokeID, uint8_t weather, uint8_t turn) {
-    if (sectionChangeWeather == nullptr) {
-        return false;
-    }
-    auto* secObj = reinterpret_cast<Il2CppObject*>(sectionChangeWeather);
-    Il2CppClass* secClass = secObj->klass;
-    if (secClass == nullptr) {
-        return false;
-    }
-
-    Il2CppClass* descClass = findNestedClassByName(secClass, "Description");
-    Il2CppClass* resClass = findNestedClassByName(secClass, "Result");
-    const MethodInfo* execMethod = findMethodByName(secClass, "Execute", 2);
-    if (descClass == nullptr || resClass == nullptr || execMethod == nullptr) {
-        return false;
-    }
-
-    if ((descClass->_2.bitflags2 >> 1 & 1) && (descClass->_2.cctor_finished == 0)) {
-        il2cpp_runtime_class_init(descClass);
-    }
-    if ((resClass->_2.bitflags2 >> 1 & 1) && (resClass->_2.cctor_finished == 0)) {
-        il2cpp_runtime_class_init(resClass);
-    }
-
-    void* descObj = il2cpp_object_new(descClass);
-    void* resObj = il2cpp_object_new(resClass);
-    if (descObj == nullptr || resObj == nullptr) {
-        return false;
-    }
-
-    if (const MethodInfo* descCtor = findMethodByName(descClass, ".ctor", 0); descCtor != nullptr) {
-        reinterpret_cast<void(*)(void*, const MethodInfo*)>(descCtor->methodPointer)(descObj, descCtor);
-    }
-    if (const MethodInfo* resCtor = findMethodByName(resClass, ".ctor", 0); resCtor != nullptr) {
-        reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
-    }
-
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "weather", weather);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "turn", turn);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "turnUpCount", 0);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "cause", 0); // ChangeWeatherCause::OTHERS (1-byte enum)
-    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", false);
-    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", false);
-    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayEffect", true);
-    writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", false);
-
-    reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
-        sectionChangeWeather, resObj, &descObj, execMethod);
     return true;
 }
 
@@ -626,13 +566,9 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         return;
     }
 
+    gPreMegaTokusei = param->fields.m_tokusei;
     gActiveMegaForm = targetForm;
     gMegaBattlePokeID = param->GetID();
-    if (auto* srcPoke = param->GetSrcData(); srcPoke != nullptr) {
-        gPreMegaTokusei = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(srcPoke)->GetTokuseiNo();
-    } else {
-        gPreMegaTokusei = param->fields.m_tokusei;
-    }
 
     const uint16_t accessoryId = ownedMegaAccessoryInBag();
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
@@ -687,12 +623,15 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
 
-    // Trigger real Harsh Sunlight weather (brightens 3D battlefield like Sunny Day + 5-turn weather + 1 Drought banner).
-    if (targetForm == kMegaYForm) {
-        void* weatherSec = container->fields.m_section_FromEvent_ChangeWeather != nullptr
-            ? container->fields.m_section_FromEvent_ChangeWeather
-            : container->fields.m_section_ChangeWeather;
-        invokeNativeChangeWeather(weatherSec, param->GetID(), /*Harsh Sunlight=*/1, /*turns=*/5);
+    // Now that invokeNativeChangeTokusei has registered the Mega Ability's real EventFactor
+    // (e.g. HandlerTable_Hideri for Drought), fire native MEMBER_IN_COMP so BDSP's own
+    // ability handler runs common_weather_change (Sunny Day brightening + 5-turn Harsh Sunlight).
+    if (msgSec != nullptr && msgSec->fields.m_pEventSystem != nullptr) {
+        auto* eventSys = reinterpret_cast<Dpr::Battle::Logic::EventSystem::Object*>(msgSec->fields.m_pEventSystem);
+        eventSys->EVENTVAR_Push();
+        eventSys->EVENTVAR_SetConstValue(Dpr::Battle::Logic::EventVar::Label::POKEID, param->GetID());
+        eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN_COMP);
+        eventSys->EVENTVAR_Pop();
     }
 }
 } // namespace mega
