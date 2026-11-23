@@ -32,6 +32,7 @@
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
 #include "externals/Dpr/Message/MessageManager.h"
 #include "externals/Dpr/UI/UIManager.h"
+#include "externals/GameData/DataManager.h"
 #include "externals/Dpr/UI/UIText.h"
 #include "externals/Pml/PmlUse.h"
 #include "externals/Pml/Item/ItemData.h"
@@ -444,6 +445,32 @@ HOOK_DEFINE_TRAMPOLINE(CheckUnbreakablePokeItem) {
     }
 };
 
+HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
+    static XLSXContent::PokemonInfo::SheetCatalog::Object* Callback(
+        int32_t monsNo, int32_t formNo, Pml::Sex sex, bool isRare, bool isEgg) {
+        if (monsNo == mega::kCharizardSpecies &&
+            (formNo == mega::kMegaXForm || formNo == mega::kMegaYForm)) {
+            auto* base = Orig(monsNo, mega::kBaseForm, sex, isRare, isEgg);
+            if (base != nullptr && base->klass != nullptr) {
+                auto* clone = reinterpret_cast<XLSXContent::PokemonInfo::SheetCatalog::Object*>(
+                    il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
+                if (clone != nullptr) {
+                    std::memcpy(&clone->fields, &base->fields,
+                                sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields));
+                    clone->fields.FormNo = formNo;
+                    clone->fields.Rare = isRare;
+                    const char* bundleName = (formNo == mega::kMegaXForm)
+                        ? (isRare ? "pm0006_01_01" : "pm0006_01_00")
+                        : (isRare ? "pm0006_02_01" : "pm0006_02_00");
+                    clone->fields.AssetBundleName = System::String::Create(bundleName);
+                    return clone;
+                }
+            }
+        }
+        return Orig(monsNo, formNo, sex, isRare, isEgg);
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
     static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
         if (const char* customName = mega::customMegaAtlasSpriteName(itemId, isLarge); customName != nullptr) {
@@ -738,6 +765,7 @@ extern "C" void exl_main(void*, void*) {
 
     // Install non-conflicting Battle & ItemData hooks immediately so they are always active.
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
+    DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
