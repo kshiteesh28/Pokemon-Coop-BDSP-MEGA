@@ -1,0 +1,28 @@
+name: Build PKLumiHex macOS App
+
+on:
+  push:
+    branches:
+      - feature/pklumihex-mac
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build PKLumiHex.app (Apple Silicon)
+        run: |
+          chmod +x tools/PKLumiHex.Mac/build-mac-app.sh
+          ./tools/PKLumiHex.Mac/build-mac-app.sh osx-arm64
+          ditto -c -k --sequesterRsrc --keepParent tools/PKLumiHex.Mac/dist/PKLumiHex.app tools/PKLumiHex.Mac/dist/PKLumiHex-macOS-arm64.zip
+      - name: Upload macOS App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PKLumiHex-macOS-arm64
+          path: tools/PKLumiHex.Mac/dist/PKLumiHex-macOS-arm64.zip
+          if-no-files-found: error

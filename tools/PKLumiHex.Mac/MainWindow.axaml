@@ -1,0 +1,231 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PKLumiHex.Mac.MainWindow"
+        Title="PKLumiHex — Luminescent Platinum Save Editor"
+        Width="1180" Height="780"
+        MinWidth="960" MinHeight="660">
+  <DockPanel Margin="16">
+    <!-- Top Header Bar -->
+    <Border DockPanel.Dock="Top" Classes="card" Padding="14,10" Margin="0,0,0,12">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <TextBlock Text="PKLumiHex" FontSize="18" FontWeight="Bold" Foreground="#F8FAFC" VerticalAlignment="Center" Margin="0,0,8,0" />
+          <Button Name="OpenButton" Classes="primary" Content="Open Save..." Click="OnOpenClick" />
+          <Button Name="SaveButton" Classes="subtle" Content="Save (+ .bak)" Click="OnSaveClick" IsEnabled="False" />
+          <Button Name="SaveAsButton" Classes="subtle" Content="Save As..." Click="OnSaveAsClick" IsEnabled="False" />
+        </StackPanel>
+        <Border DockPanel.Dock="Right" Background="#141821" CornerRadius="6" Padding="10,5" VerticalAlignment="Center">
+          <TextBlock Name="StatusText" FontSize="12" Foreground="#94A3B8" Text="Open a Luminescent Platinum SaveData.bin to begin." />
+        </Border>
+      </DockPanel>
+    </Border>
+
+    <!-- Main Workspace Tabs -->
+    <TabControl Name="MainTabs" IsEnabled="False">
+      <!-- TAB 1: PARTY & BOXES -->
+      <TabItem Header="Party &amp; Boxes">
+        <Grid ColumnDefinitions="330,*" Margin="0,10,0,0">
+          <!-- Left Sidebar: Container + Slots -->
+          <Border Grid.Column="0" Classes="card" Margin="0,0,12,0">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,10">
+                <TextBlock Classes="section" Text="STORAGE" />
+                <ComboBox Name="ContainerPicker" HorizontalAlignment="Stretch" SelectionChanged="OnContainerChanged" />
+              </StackPanel>
+              <ListBox Name="SlotList" Background="Transparent" SelectionChanged="OnSlotSelected" />
+            </DockPanel>
+          </Border>
+
+          <!-- Right Panel: Pokémon Inspector -->
+          <ScrollViewer Grid.Column="1">
+            <StackPanel Spacing="12">
+              <!-- Summary Header Card -->
+              <Border Classes="card">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Name="SlotHeader" FontSize="20" FontWeight="Bold" Foreground="#F8FAFC" Text="Select a Pokémon slot" />
+                    <TextBlock Name="SlotSubheader" FontSize="12" Foreground="#94A3B8" Margin="0,2,0,0" Text="Changes apply to the selected slot when you click Apply." />
+                  </StackPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Classes="accent" Content="Equip Charizardite X" Click="OnGiveCharizarditeX" />
+                    <Button Classes="accent" Content="Equip Charizardite Y" Click="OnGiveCharizarditeY" />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- Core Identity Card -->
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="section" Text="IDENTITY &amp; HELD ITEM" />
+                  <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto">
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,10">
+                      <TextBlock Classes="fieldLabel" Text="Species (search by name or ID)" />
+                      <AutoCompleteBox Name="SpeciesAutoBox" Watermark="e.g. Charizard" FilterMode="Contains" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,10,10">
+                      <TextBlock Classes="fieldLabel" Text="Nickname" />
+                      <TextBox Name="NicknameBox" Watermark="Nickname" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,10">
+                      <TextBlock Classes="fieldLabel" Text="Held Item (search by name or ID)" />
+                      <AutoCompleteBox Name="HeldItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="Contains" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,10,0">
+                      <TextBlock Classes="fieldLabel" Text="Ability (search by name or ID)" />
+                      <AutoCompleteBox Name="AbilityAutoBox" Watermark="e.g. Blaze" FilterMode="Contains" />
+                    </StackPanel>
+                    <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,*" Margin="0,0,10,0">
+                      <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Classes="fieldLabel" Text="Level (1–100)" />
+                        <NumericUpDown Name="LevelSpinner" Minimum="1" Maximum="100" Increment="1" FormatString="0" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1">
+                        <TextBlock Classes="fieldLabel" Text="Form" />
+                        <NumericUpDown Name="FormSpinner" Minimum="0" Maximum="64" Increment="1" FormatString="0" />
+                      </StackPanel>
+                    </Grid>
+                    <StackPanel Grid.Row="1" Grid.Column="2" VerticalAlignment="Bottom" Margin="0,0,0,4">
+                      <CheckBox Name="ShinyCheck" Content="Shiny Pokémon ★" FontWeight="SemiBold" Foreground="#FBBF24" />
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <!-- Moves Card -->
+              <Border Classes="card">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="section" Text="MOVESET (SEARCH BY NAME OR ID)" />
+                  <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                    <AutoCompleteBox Grid.Row="0" Grid.Column="0" Name="Move1AutoBox" Watermark="Move 1" FilterMode="Contains" Margin="0,0,10,8" />
+                    <AutoCompleteBox Grid.Row="0" Grid.Column="1" Name="Move2AutoBox" Watermark="Move 2" FilterMode="Contains" Margin="0,0,0,8" />
+                    <AutoCompleteBox Grid.Row="1" Grid.Column="0" Name="Move3AutoBox" Watermark="Move 3" FilterMode="Contains" Margin="0,0,10,0" />
+                    <AutoCompleteBox Grid.Row="1" Grid.Column="1" Name="Move4AutoBox" Watermark="Move 4" FilterMode="Contains" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <!-- Stats Card (IVs & EVs) -->
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Classes="section" Text="INDIVIDUAL VALUES (IVs) &amp; EFFORT VALUES (EVs)" VerticalAlignment="Center" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <TextBlock Name="EvTotalText" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center" Text="EV Total: 0 / 510" />
+                      <Button Classes="subtle" Content="Max IVs (6×31)" Click="OnMaxIvsClick" />
+                    </StackPanel>
+                  </DockPanel>
+
+                  <Grid ColumnDefinitions="*,*,*,*,*,*" RowDefinitions="Auto,Auto,Auto">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="HP" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Classes="fieldLabel" Text="Atk" />
+                    <TextBlock Grid.Row="0" Grid.Column="2" Classes="fieldLabel" Text="Def" />
+                    <TextBlock Grid.Row="0" Grid.Column="3" Classes="fieldLabel" Text="SpA" />
+                    <TextBlock Grid.Row="0" Grid.Column="4" Classes="fieldLabel" Text="SpD" />
+                    <TextBlock Grid.Row="0" Grid.Column="5" Classes="fieldLabel" Text="Spe" />
+
+                    <NumericUpDown Grid.Row="1" Grid.Column="0" Name="IvHpSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,6,8" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Name="IvAtkSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,6,8" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="2" Name="IvDefSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,6,8" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="3" Name="IvSpaSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,6,8" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="4" Name="IvSpdSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,6,8" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="5" Name="IvSpeSpinner" Minimum="0" Maximum="31" FormatString="0" Margin="0,0,0,8" />
+
+                    <NumericUpDown Grid.Row="2" Grid.Column="0" Name="EvHpSpinner" Minimum="0" Maximum="252" FormatString="0" Margin="0,0,6,0" ValueChanged="OnEvChanged" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" Name="EvAtkSpinner" Minimum="0" Maximum="252" FormatString="0" Margin="0,0,6,0" ValueChanged="OnEvChanged" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="2" Name="EvDefSpinner" Minimum="0" Maximum="252" FormatString="0" Margin="0,0,6,0" ValueChanged="OnEvChanged" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="3" Name="EvSpaSpinner" Minimum="0" Maximum="252" FormatString="0" Margin="0,0,6,0" ValueChanged="OnEvChanged" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="4" Name="EvSpdSpinner" Minimum="0" Maximum="252" FormatString="0" Margin="0,0,6,0" ValueChanged="OnEvChanged" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="5" Name="EvSpeSpinner" Minimum="0" Maximum="252" FormatString="0" ValueChanged="OnEvChanged" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <!-- Apply Footer -->
+              <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,2,0,8">
+                <Button Classes="primary" Content="Apply Changes to Slot" Click="OnApplyPokemonClick" />
+                <TextBlock Name="PokemonStatusText" VerticalAlignment="Center" Foreground="#34D399" FontWeight="SemiBold" />
+              </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </TabItem>
+
+      <!-- TAB 2: BAG EDITOR -->
+      <TabItem Header="Bag Editor">
+        <Grid ColumnDefinitions="*,340" Margin="0,10,0,0">
+          <!-- Left: Pocket Filter + Items -->
+          <Border Grid.Column="0" Classes="card" Margin="0,0,12,0">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,10">
+                <ComboBox Name="PocketPicker" Width="210" SelectionChanged="OnPocketChanged" />
+                <TextBox Name="BagFilterBox" Width="240" Watermark="Filter items in pocket..." TextChanged="OnBagFilterChanged" />
+              </StackPanel>
+              <ListBox Name="BagItemList" Background="Transparent" SelectionChanged="OnBagItemSelected" />
+            </DockPanel>
+          </Border>
+
+          <!-- Right: Add/Edit + Quick Kits -->
+          <StackPanel Grid.Column="1" Spacing="12">
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section" Text="ADD OR EDIT ITEM" />
+                <StackPanel>
+                  <TextBlock Classes="fieldLabel" Text="Item (search by name or ID)" />
+                  <AutoCompleteBox Name="BagItemAutoBox" Watermark="e.g. Charizardite X" FilterMode="Contains" />
+                </StackPanel>
+                <StackPanel>
+                  <TextBlock Classes="fieldLabel" Text="Quantity (0 removes item)" />
+                  <NumericUpDown Name="BagItemCountSpinner" Minimum="0" Maximum="999" Value="1" FormatString="0" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="primary" Content="Set Item" Click="OnAddBagItemClick" />
+                  <Button Classes="subtle" Content="Remove" Click="OnRemoveBagItemClick" />
+                </StackPanel>
+                <TextBlock Name="BagStatusText" TextWrapping="Wrap" FontSize="12" Foreground="#34D399" />
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section" Text="QUICK KITS" />
+                <TextBlock FontSize="12" Foreground="#94A3B8" TextWrapping="Wrap"
+                           Text="Adds Key Stone (773) to Key Items and Charizardite X (660) + Charizardite Y (678) to Items." />
+                <Button Classes="accent" Content="Grant Mega Charizard Kit" Click="OnGrantMegaKitClick" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <!-- TAB 3: TRAINER INFO -->
+      <TabItem Header="Trainer Info">
+        <Border Classes="card" MaxWidth="520" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,10,0,0">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="section" Text="TRAINER PROFILE" />
+            <StackPanel>
+              <TextBlock Classes="fieldLabel" Text="Trainer Name (OT)" />
+              <TextBox Name="TrainerNameBox" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Classes="fieldLabel" Text="Money (₽)" />
+              <NumericUpDown Name="MoneySpinner" Minimum="0" Maximum="9999999" Increment="1000" FormatString="0" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Classes="fieldLabel" Text="Language ID (2 = English)" />
+              <NumericUpDown Name="LanguageSpinner" Minimum="1" Maximum="10" Increment="1" FormatString="0" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Classes="fieldLabel" Text="Detected Save Version" />
+              <TextBlock Name="VersionText" FontWeight="SemiBold" Foreground="#F8FAFC" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+              <Button Classes="primary" Content="Apply Trainer Info" Click="OnApplyTrainerClick" />
+              <TextBlock Name="TrainerStatusText" VerticalAlignment="Center" Foreground="#34D399" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>
