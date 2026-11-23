@@ -640,25 +640,87 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private static bool TryGetBdspItemLayout(SAV8BS sav, out Memory<byte> buffer, out int baseOffset, out int stride, out int indexBase)
+    {
+        stride = BdspItemSize;
+        indexBase = 1;
+        if (!TryGetBdspItemBuffer(sav, out buffer, out baseOffset))
+            return false;
+
+        // Collect ground-truth owned items from PKHeX.Core's own Inventory parser
+        // to auto-detect exact SaveItem stride (12 vs 16) and index base (0-based vs 1-based).
+        var samples = new List<(int Id, int Count)>();
+        foreach (var pouch in sav.Inventory)
+        {
+            foreach (var item in pouch.Items)
+            {
+                if (item.Index > 0 && item.Count > 0)
+                {
+                    samples.Add((item.Index, item.Count));
+                    if (samples.Count >= 12)
+                        break;
+                }
+            }
+            if (samples.Count >= 12)
+                break;
+        }
+
+        if (samples.Count == 0)
+            return true;
+
+        var candidates = new (int Stride, int Base)[] { (12, 1), (12, 0), (16, 1), (16, 0) };
+        int bestScore = -1;
+        foreach (var cand in candidates)
+        {
+            int score = 0;
+            foreach (var (id, cnt) in samples)
+            {
+                int slotIdx = id - cand.Base;
+                if (slotIdx < 0)
+                    continue;
+                int pos = baseOffset + (slotIdx * cand.Stride);
+                if (pos >= 0 && pos + 4 <= buffer.Length &&
+                    BinaryPrimitives.ReadInt32LittleEndian(buffer.Span.Slice(pos, 4)) == cnt)
+                {
+                    score++;
+                }
+            }
+            if (score > bestScore)
+            {
+                bestScore = score;
+                stride = cand.Stride;
+                indexBase = cand.Base;
+            }
+        }
+
+        return true;
+    }
+
     private static int GetBdspItemCount(SAV8BS sav, int itemId)
     {
-        if (itemId <= 0 || !TryGetBdspItemBuffer(sav, out var buffer, out var baseOffset))
+        if (itemId <= 0 || !TryGetBdspItemLayout(sav, out var buffer, out var baseOffset, out var stride, out var indexBase))
             return 0;
-        int pos = baseOffset + (itemId * BdspItemSize);
-        if (pos < 0 || pos + BdspItemSize > buffer.Length)
+        int slotIdx = itemId - indexBase;
+        if (slotIdx < 0)
+            return 0;
+        int pos = baseOffset + (slotIdx * stride);
+        if (pos < 0 || pos + stride > buffer.Length)
             return 0;
         return BinaryPrimitives.ReadInt32LittleEndian(buffer.Span.Slice(pos, 4));
     }
 
     private static bool SetBdspItemCount(SAV8BS sav, int itemId, int count)
     {
-        if (itemId <= 0 || !TryGetBdspItemBuffer(sav, out var buffer, out var baseOffset))
+        if (itemId <= 0 || !TryGetBdspItemLayout(sav, out var buffer, out var baseOffset, out var stride, out var indexBase))
             return false;
-        int pos = baseOffset + (itemId * BdspItemSize);
-        if (pos < 0 || pos + BdspItemSize > buffer.Length)
+        int slotIdx = itemId - indexBase;
+        if (slotIdx < 0)
+            return false;
+        int pos = baseOffset + (slotIdx * stride);
+        if (pos < 0 || pos + stride > buffer.Length)
             return false;
         int clamped = Math.Clamp(count, 0, 999);
-        var slot = buffer.Span.Slice(pos, BdspItemSize);
+        var slot = buffer.Span.Slice(pos, stride);
         BinaryPrimitives.WriteInt32LittleEndian(slot, clamped);
         if (clamped == 0)
         {
@@ -667,7 +729,7 @@ public partial class MainWindow : Window
         else
         {
             slot[4] = 1; // VanishNew = true
-            if (BinaryPrimitives.ReadUInt16LittleEndian(slot.Slice(10, 2)) == 0)
+            if (stride >= 12 && BinaryPrimitives.ReadUInt16LittleEndian(slot.Slice(10, 2)) == 0)
                 BinaryPrimitives.WriteUInt16LittleEndian(slot.Slice(10, 2), (ushort)Math.Clamp(itemId, 1, ushort.MaxValue));
         }
         return true;
