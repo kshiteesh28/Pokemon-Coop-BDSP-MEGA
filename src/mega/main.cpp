@@ -613,7 +613,7 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     gActiveMegaForm = targetForm;
     gMegaBattlePokeID = param->GetID();
     if (auto* srcPoke = param->GetSrcData(); srcPoke != nullptr) {
-        gPreMegaTokusei = srcPoke->GetTokuseiNo();
+        gPreMegaTokusei = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(srcPoke)->GetTokuseiNo();
     } else {
         gPreMegaTokusei = param->fields.m_tokusei;
     }
