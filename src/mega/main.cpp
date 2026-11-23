@@ -18,6 +18,9 @@
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
 #include "externals/Dpr/Battle/Logic/BattleEnv.h"
+#include "externals/Dpr/Battle/Logic/EventID.h"
+#include "externals/Dpr/Battle/Logic/EventVar.h"
+#include "externals/Dpr/Battle/Logic/EventSystem.h"
 #include "externals/Dpr/Battle/Logic/Section.h"
 #include "externals/Dpr/Battle/Logic/ServerCommandPutter.h"
 #include "externals/Dpr/Battle/Logic/SectionContainer.h"
@@ -439,27 +442,18 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         if (msgSec->fields.m_pServerCmdPutter != nullptr) {
             msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
         }
-        // Activate Drought (Harsh Sunlight = weather 1, 5 turns) directly on FieldStatus for Mega Charizard Y.
-        if (targetForm == kMegaYForm && msgSec->fields.m_pBattleEnv != nullptr) {
-            auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(msgSec->fields.m_pBattleEnv);
-            auto* fieldStatus = battleEnv->fields.m_fieldStatus;
-            if (fieldStatus != nullptr && fieldStatus->fields.m_data != nullptr) {
-                fieldStatus->fields.m_data->fields.weather = 1; // BTL_WEATHER_SHINE
-                fieldStatus->fields.m_data->fields.weatherTurn = 5;
-                fieldStatus->fields.m_data->fields.weatherTurnCount = 0;
-                fieldStatus->fields.m_data->fields.weatherCausePokeID = param->GetID();
-            }
+        // Treat the newly Mega Evolved Pokemon as entering battle fresh so switch-in abilities
+        // (e.g. Drought, Intimidate, Drizzle, Sand Stream, Snow Warning) activate natively with
+        // their own BDSP ability banner and field/weather animations — without any custom popup.
+        if (msgSec->fields.m_pEventSystem != nullptr) {
+            auto* eventSys = reinterpret_cast<Dpr::Battle::Logic::EventSystem::Object*>(msgSec->fields.m_pEventSystem);
+            eventSys->EVENTVAR_Push();
+            eventSys->EVENTVAR_SetConstValue(Dpr::Battle::Logic::EventVar::Label::POKEID, param->GetID());
+            eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN);
+            eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN_COMP);
+            eventSys->EVENTVAR_Pop();
         }
     }
-
-    auto* abilityDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
-    abilityDesc->fields.pokeID = param->GetID();
-    abilityDesc->fields.isDisplayTokuseiWindow = true;
-    abilityDesc->fields.message->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo_Y);
-    abilityDesc->fields.message->AddArg(param->GetID());
-
-    auto* abilityResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
-    container->fields.m_section_FromEvent_Message->Execute(abilityResult, &abilityDesc);
 }
 } // namespace mega
 
@@ -568,12 +562,6 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                     mega::gActiveMegaForm == mega::kMegaXForm
                         ? "Charizard's Charizardite X is reacting to your Mega Ring!"
                         : "Charizard's Charizardite Y is reacting to your Mega Ring!");
-            }
-            if (mega::utf16ContainsAscii(label, "1577") || mega::utf16ContainsAscii(label, "megaevo_y")) {
-                return System::String::Create(
-                    mega::gActiveMegaForm == mega::kMegaXForm
-                        ? "Mega Charizard X's Tough Claws boosts the power of contact moves!"
-                        : "Mega Charizard Y's Drought intensified the sun's rays!");
             }
             if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
                 return System::String::Create(

@@ -44,3 +44,6 @@ config.cmake
 
 # Script outputs
 socket.log
+
+scripts/tools/*/bin/
+scripts/tools/*/obj/
