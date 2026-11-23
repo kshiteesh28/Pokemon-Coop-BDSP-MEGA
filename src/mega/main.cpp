@@ -118,6 +118,127 @@ bool gMegaBattleAllowed = true;
 bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
 int gActiveMegaForm = 0;
+bool gInMegaTokuseiSwap = false;
+
+struct Il2CppFieldInfo {
+    const char* name;
+    const Il2CppType* type;
+    Il2CppClass* parent;
+    int32_t offset;
+    uint32_t token;
+};
+
+inline Il2CppClass* findNestedClassByName(Il2CppClass* parent, const char* targetName) {
+    if (parent == nullptr || parent->_1.nestedTypes == nullptr || targetName == nullptr) {
+        return nullptr;
+    }
+    for (uint16_t i = 0; i < parent->_2.nested_type_count; ++i) {
+        Il2CppClass* nested = parent->_1.nestedTypes[i];
+        if (nested != nullptr && nested->_1.name != nullptr && std::strcmp(nested->_1.name, targetName) == 0) {
+            return nested;
+        }
+    }
+    return nullptr;
+}
+
+inline const MethodInfo* findMethodByName(Il2CppClass* klass, const char* targetName, int expectedParams) {
+    if (klass == nullptr || klass->_1.methods == nullptr || targetName == nullptr) {
+        return nullptr;
+    }
+    auto** methods = reinterpret_cast<const MethodInfo**>(klass->_1.methods);
+    for (uint16_t i = 0; i < klass->_2.method_count; ++i) {
+        const MethodInfo* m = methods[i];
+        if (m != nullptr && m->name != nullptr && m->methodPointer != nullptr &&
+            std::strcmp(m->name, targetName) == 0 &&
+            (expectedParams < 0 || m->parameters_count == expectedParams)) {
+            return m;
+        }
+    }
+    return nullptr;
+}
+
+inline const Il2CppFieldInfo* findFieldByName(Il2CppClass* klass, const char* targetName) {
+    if (klass == nullptr || klass->_1.fields == nullptr || targetName == nullptr) {
+        return nullptr;
+    }
+    auto* fields = reinterpret_cast<const Il2CppFieldInfo*>(klass->_1.fields);
+    for (uint16_t i = 0; i < klass->_2.field_count; ++i) {
+        if (fields[i].name != nullptr && std::strcmp(fields[i].name, targetName) == 0) {
+            return &fields[i];
+        }
+    }
+    return nullptr;
+}
+
+template <typename T>
+inline bool writeFieldIfPresent(void* obj, Il2CppClass* klass, const char* fieldName, T value) {
+    if (obj == nullptr || klass == nullptr) {
+        return false;
+    }
+    const Il2CppFieldInfo* fi = findFieldByName(klass, fieldName);
+    if (fi == nullptr || fi->offset < 0 || static_cast<uint32_t>(fi->offset) + sizeof(T) > klass->_2.instance_size) {
+        return false;
+    }
+    std::memcpy(reinterpret_cast<uint8_t*>(obj) + fi->offset, &value, sizeof(T));
+    return true;
+}
+
+// Dynamically invokes BDSP's native Section_FromEvent_ChangeTokusei::Execute using live IL2CPP metadata
+// so the pre-Mega EventFactor (e.g. Blaze) is cleanly unregistered, the Mega Ability EventFactor
+// (e.g. Drought / Tough Claws / Intimidate / etc.) is registered, BattleView updates its ability cache,
+// and Section_AfterTokuseiChanged_Event fires switch-in ability effects natively.
+inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID, uint16_t nextTokusei) {
+    if (sectionChangeTokusei == nullptr) {
+        return false;
+    }
+    auto* secObj = reinterpret_cast<Il2CppObject*>(sectionChangeTokusei);
+    Il2CppClass* secClass = secObj->klass;
+    if (secClass == nullptr) {
+        return false;
+    }
+
+    Il2CppClass* descClass = findNestedClassByName(secClass, "Description");
+    Il2CppClass* resClass = findNestedClassByName(secClass, "Result");
+    const MethodInfo* execMethod = findMethodByName(secClass, "Execute", 2);
+    if (descClass == nullptr || resClass == nullptr || execMethod == nullptr) {
+        return false;
+    }
+
+    if ((descClass->_2.bitflags2 >> 1 & 1) && (descClass->_2.cctor_finished == 0)) {
+        il2cpp_runtime_class_init(descClass);
+    }
+    if ((resClass->_2.bitflags2 >> 1 & 1) && (resClass->_2.cctor_finished == 0)) {
+        il2cpp_runtime_class_init(resClass);
+    }
+
+    void* descObj = il2cpp_object_new(descClass);
+    void* resObj = il2cpp_object_new(resClass);
+    if (descObj == nullptr || resObj == nullptr) {
+        return false;
+    }
+
+    if (const MethodInfo* descCtor = findMethodByName(descClass, ".ctor", 0); descCtor != nullptr) {
+        reinterpret_cast<void(*)(void*, const MethodInfo*)>(descCtor->methodPointer)(descObj, descCtor);
+    }
+    if (const MethodInfo* resCtor = findMethodByName(resClass, ".ctor", 0); resCtor != nullptr) {
+        reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
+    }
+
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", pokeID);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "targetPokeID", pokeID);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
+    writeFieldIfPresent<int32_t>(descObj, descClass, "tokusei", static_cast<int32_t>(nextTokusei));
+    writeFieldIfPresent<bool>(descObj, descClass, "isSameTokuseiEnable", true);
+    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", false);
+    writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", true);
+    writeFieldIfPresent<bool>(descObj, descClass, "isNotDisplayMessage", true);
+
+    gInMegaTokuseiSwap = true;
+    reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
+        sectionChangeTokusei, resObj, &descObj, execMethod);
+    gInMegaTokuseiSwap = false;
+    return true;
+}
 
 void installSharedPostInitHooks();
 
@@ -427,8 +548,14 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
     container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
 
-    // Apply the Mega form's new Ability across BTL_POKEPARAM, CoreParam/Accessor, and BattleView client cache.
+    // Swap the active Ability EventFactor (e.g. Blaze -> Tough Claws / Drought) via BDSP's native
+    // Section_FromEvent_ChangeTokusei so the new Ability's EventHandlerTable is registered and
+    // switch-in abilities (Drought, Intimidate, Drizzle, etc.) trigger natively with their real
+    // BDSP ability banner and weather/field effects.
     const uint16_t megaAbility = static_cast<uint16_t>(targetForm == kMegaXForm ? kToughClaws : kDrought);
+    invokeNativeChangeTokusei(container->fields.m_section_FromEvent_ChangeTokusei, param->GetID(), megaAbility);
+
+    // Ensure BTL_POKEPARAM, CoreParam/Accessor, and BattleView client info all reflect the Mega Ability.
     param->fields.m_tokusei = megaAbility;
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
@@ -438,21 +565,8 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     }
 
     auto* msgSec = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(container->fields.m_section_FromEvent_Message);
-    if (msgSec != nullptr) {
-        if (msgSec->fields.m_pServerCmdPutter != nullptr) {
-            msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
-        }
-        // Treat the newly Mega Evolved Pokemon as entering battle fresh so switch-in abilities
-        // (e.g. Drought, Intimidate, Drizzle, Sand Stream, Snow Warning) activate natively with
-        // their own BDSP ability banner and field/weather animations — without any custom popup.
-        if (msgSec->fields.m_pEventSystem != nullptr) {
-            auto* eventSys = reinterpret_cast<Dpr::Battle::Logic::EventSystem::Object*>(msgSec->fields.m_pEventSystem);
-            eventSys->EVENTVAR_Push();
-            eventSys->EVENTVAR_SetConstValue(Dpr::Battle::Logic::EventVar::Label::POKEID, param->GetID());
-            eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN);
-            eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN_COMP);
-            eventSys->EVENTVAR_Pop();
-        }
+    if (msgSec != nullptr && msgSec->fields.m_pServerCmdPutter != nullptr) {
+        msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
 }
 } // namespace mega
@@ -472,7 +586,7 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
     static int32_t Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this,
                             Dpr::Battle::Logic::BTL_POKEPARAM::ValueID vid) {
-        if (__this != nullptr &&
+        if (!mega::gInMegaTokuseiSwap && __this != nullptr &&
             (vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI ||
              vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI_EFFECTIVE)) {
             if (__this->GetMonsNo() == mega::kCharizardSpecies) {
@@ -487,7 +601,7 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
 
 HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
     static uint16_t Callback(Pml::PokePara::CoreParam::Object* __this) {
-        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (!mega::gInMegaTokuseiSwap && __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
             const uint16_t form = __this->GetFormNo();
             if (form == mega::kMegaXForm) return static_cast<uint16_t>(mega::kToughClaws);
             if (form == mega::kMegaYForm) return static_cast<uint16_t>(mega::kDrought);

@@ -3,9 +3,11 @@ name: Build Mega subsdk2 for Ryujinx
 on:
   push:
     branches:
+      - main
       - feature/mega-evolution
   pull_request:
     branches:
+      - main
       - master
   workflow_dispatch:
 
