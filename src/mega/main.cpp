@@ -131,7 +131,13 @@ inline bool isBattleEnded() {
     return procClass->static_fields->_isEnd || !procClass->static_fields->_isInitialized;
 }
 
+bool gInMegaRevert = false;
+
 inline void revertMegaFormInParty() {
+    if (gInMegaRevert) {
+        return;
+    }
+    gInMegaRevert = true;
     PlayerWork::getClass()->initIfNeeded();
     if (auto* party = PlayerWork::get_playerParty(); party != nullptr) {
         const uint32_t count = party->fields.m_memberCount;
@@ -154,6 +160,7 @@ inline void revertMegaFormInParty() {
     gActiveMegaForm = 0;
     gMegaArmed = false;
     gMegaBattlePokeID = 0xFF;
+    gInMegaRevert = false;
 }
 
 struct Il2CppFieldInfo {
@@ -212,10 +219,21 @@ inline bool writeFieldIfPresent(void* obj, Il2CppClass* klass, const char* field
         return false;
     }
     const Il2CppFieldInfo* fi = findFieldByName(klass, fieldName);
-    if (fi == nullptr || fi->offset < 0 || static_cast<uint32_t>(fi->offset) + sizeof(T) > klass->_2.instance_size) {
+    if (fi == nullptr || fi->offset < 0) {
         return false;
     }
-    std::memcpy(reinterpret_cast<uint8_t*>(obj) + fi->offset, &value, sizeof(T));
+    uint32_t fieldOff = static_cast<uint32_t>(fi->offset);
+    uint32_t nextOff = klass->_2.instance_size;
+    auto* allFields = reinterpret_cast<const Il2CppFieldInfo*>(klass->_1.fields);
+    for (uint16_t i = 0; i < klass->_2.field_count; ++i) {
+        if (allFields[i].offset > fi->offset && static_cast<uint32_t>(allFields[i].offset) < nextOff) {
+            nextOff = static_cast<uint32_t>(allFields[i].offset);
+        }
+    }
+    if (fieldOff + sizeof(T) > nextOff) {
+        return false;
+    }
+    std::memcpy(reinterpret_cast<uint8_t*>(obj) + fieldOff, &value, sizeof(T));
     return true;
 }
 
@@ -260,9 +278,7 @@ inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID
         reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
     }
 
-    // Pass BTL_POKEID_NULL (31) for userPokeID so ChangeTokusei only targets pokeID and never
-    // shows a duplicate user+target ability banner.
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", 31);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", pokeID);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "targetPokeID", pokeID);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
     writeFieldIfPresent<int32_t>(descObj, descClass, "tokusei", static_cast<int32_t>(nextTokusei));
@@ -325,9 +341,9 @@ inline bool invokeNativeChangeWeather(void* sectionChangeWeather, uint8_t pokeID
     writeFieldIfPresent<uint8_t>(descObj, descClass, "weather", weather);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "turn", turn);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "turnUpCount", 0);
-    writeFieldIfPresent<int32_t>(descObj, descClass, "cause", 1); // ChangeWeatherCause::TOKUSEI
-    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", true);
-    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", true);
+    writeFieldIfPresent<uint8_t>(descObj, descClass, "cause", 0); // ChangeWeatherCause::OTHERS (1-byte enum)
+    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", false);
+    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", false);
     writeFieldIfPresent<bool>(descObj, descClass, "isDisplayEffect", true);
     writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", false);
 
