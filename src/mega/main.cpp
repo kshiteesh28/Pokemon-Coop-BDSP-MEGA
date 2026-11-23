@@ -111,6 +111,7 @@ bool gItemTablePatched = false;
 bool gMegaBattleAllowed = true;
 bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
+int gActiveMegaForm = 0;
 
 void installSharedPostInitHooks();
 
@@ -386,11 +387,15 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         return;
     }
 
+    gActiveMegaForm = targetForm;
+
     const uint16_t accessoryId = ownedMegaAccessoryInBag();
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
 
+    // ORAS-style start sentence: "[Charizard]'s Charizardite X/Y is reacting to [Player]'s Mega Ring!"
     auto* msgDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
     msgDesc->fields.pokeID = param->GetID();
+    msgDesc->fields.isDisplayTokuseiWindow = false;
     msgDesc->fields.message->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvoStart);
     msgDesc->fields.message->AddArg(param->GetID());
     msgDesc->fields.message->AddArg(pokeAction->fields.clientID);
@@ -400,11 +405,13 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
     container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
 
+    // Trigger BDSP's native form-change light-burst transformation animation & stay Mega on switch-out.
     auto* formDesc = Dpr::Battle::Logic::Section_FromEvent_FormChange::Description::newInstance();
     formDesc->fields.pokeID = param->GetID();
     formDesc->fields.formNo = static_cast<uint8_t>(targetForm);
-    formDesc->fields.isDontResetFormByOut = false;
+    formDesc->fields.isDontResetFormByOut = true;
     formDesc->fields.isEnableInCaseOfDead = false;
+    formDesc->fields.isDisplayTokuseiWindow = true;
     formDesc->fields.isDisplayChangeEffect = true;
     formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
     formDesc->fields.successMessage->AddArg(param->GetID());
@@ -462,6 +469,14 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
                                             System::String::Object* label) {
+        if (mega::gActiveMegaForm > 0 && label != nullptr &&
+            (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) &&
+            !mega::utf16ContainsAscii(label, "1572") && !mega::utf16ContainsAscii(label, "start")) {
+            return System::String::Create(
+                mega::gActiveMegaForm == mega::kMegaXForm
+                    ? "Charizard has Mega Evolved into Mega Charizard X!"
+                    : "Charizard has Mega Evolved into Mega Charizard Y!");
+        }
         if (const char* custom = mega::lookupMegaItemTextByLabel(fileName, label); custom != nullptr) {
             return System::String::Create(custom);
         }
@@ -559,22 +574,8 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
     }
 };
 
-HOOK_DEFINE_INLINE(CMD_ChangeForm_Start) {
-    static void Callback(exl::hook::nx64::InlineCtx* ctx) {
-        reinterpret_cast<Dpr::Battle::View::Systems::BattleViewSystem::Object*>(ctx->X[19])->fields.m_subSequence = 20;
-    }
-};
-
-HOOK_DEFINE_TRAMPOLINE(CMD_ACT_PokeChangeEffect_WaitCore) {
-    static bool Callback(Dpr::Battle::View::Systems::BattleViewSystem::Object* __this, bool isGChange) {
-        if (__this->fields.m_subSequence == 20) {
-            __this->PlaySequenceEffect(0, false);
-            __this->fields.m_subSequence = 7;
-            return false;
-        }
-        return Orig(__this, isGChange);
-    }
-};
+// Use BDSP's native CMD_ChangeForm_Start / CMD_ACT_PokeChangeEffect_WaitCore
+// so the built-in form-change light-burst transformation animation plays cleanly.
 
 HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
     static void Callback(Dpr::Battle::Logic::Section_ProcessActionCore::Object* __this,
@@ -696,6 +697,7 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isCantUseBall) {
         mega::gMegaArmed = false;
         mega::gMegaUsedThisBattle = false;
+        mega::gActiveMegaForm = 0;
         mega::gMegaBattleAllowed = !(isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, iPtrEnemyParty, arenaID, mapAttrib, weatherType, isSwim, isFishing, partnerID,
@@ -709,6 +711,7 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
                          int32_t partnerID) {
         mega::gMegaArmed = false;
         mega::gMegaUsedThisBattle = false;
+        mega::gActiveMegaForm = 0;
         mega::gMegaBattleAllowed = !(rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
                                      rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID));
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
@@ -743,8 +746,6 @@ extern "C" void exl_main(void*, void*) {
     ProcessActionCore$$action::InstallAtOffset(0x021c0de0);
     setupPokeAction_FromClientInstruction::InstallAtOffset(0x021cdbf0);
     createPokeAction_FromClientInstruction::InstallAtOffset(0x021cdad0);
-    CMD_ACT_PokeChangeEffect_WaitCore::InstallAtOffset(0x01c86aa0);
-    CMD_ChangeForm_Start::InstallAtOffset(0x01c86d9c);
     SetupBattleWild::InstallAtOffset(0x02c3abc0);
     SetupBattleTrainer::InstallAtOffset(0x02c3b800);
 }
