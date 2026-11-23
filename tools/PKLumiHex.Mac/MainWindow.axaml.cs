@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -408,11 +410,11 @@ public partial class MainWindow : Window
             int maxId = Math.Min(sav8bs.MaxItemID, GameInfo.Strings.Item.Count - 1);
             for (int id = 1; id <= maxId; id++)
             {
-                var entry = sav8bs.Items.GetItem(id);
-                if (entry.Count <= 0)
+                int itemCount = GetBdspItemCount(sav8bs, id);
+                if (itemCount <= 0)
                     continue;
 
-                var label = $"{GetItemName(id)} ({id})  ×{entry.Count}";
+                var label = $"{GetItemName(id)} ({id})  ×{itemCount}";
                 if (string.IsNullOrEmpty(filter) || label.Contains(filter, StringComparison.OrdinalIgnoreCase))
                     rows.Add(label);
             }
@@ -464,8 +466,8 @@ public partial class MainWindow : Window
 
         int count = Math.Max(0, (int)(BagItemCountSpinner.Value ?? 1));
 
-        // For BDSP / Luminescent Platinum saves, write directly to MyItem8b so non-whitelisted
-        // items (Mega Bracelet, Mega Ring, Key Stone, Charizardite X/Y) actually persist and display.
+        // For BDSP / Luminescent Platinum saves, write directly to MyItem8b raw SaveItem buffer
+        // so non-whitelisted items (Mega Bracelet, Mega Ring, Key Stone, Charizardite X/Y) persist.
         if (_sav is SAV8BS sav8bs)
         {
             if (itemId > sav8bs.MaxItemID)
@@ -473,13 +475,16 @@ public partial class MainWindow : Window
                 BagStatusText.Text = $"Item ID {itemId} exceeds save MaxItemID ({sav8bs.MaxItemID}).";
                 return;
             }
-            var entry = sav8bs.Items.GetItem(itemId);
-            entry.Count = Math.Clamp(count, 0, 999);
-            sav8bs.Items.SetItem(itemId, entry);
+            int clamped = Math.Clamp(count, 0, 999);
+            if (!SetBdspItemCount(sav8bs, itemId, clamped))
+            {
+                BagStatusText.Text = "Could not access BDSP item buffer.";
+                return;
+            }
             if (PocketPicker.SelectedIndex != 0)
                 PocketPicker.SelectedIndex = 0;
             RefreshBagList();
-            BagStatusText.Text = $"Saved {GetItemName(itemId)} ({itemId}) ×{entry.Count} to BDSP Bag. Click Save (+ .bak)!";
+            BagStatusText.Text = $"Saved {GetItemName(itemId)} ({itemId}) ×{clamped} to BDSP Bag. Click Save (+ .bak)!";
             return;
         }
 
@@ -512,11 +517,7 @@ public partial class MainWindow : Window
             foreach (var id in new[] { CharizarditeX, CharizarditeY, MegaBracelet, MegaRing, KeyStone })
             {
                 if (id <= sav8bs.MaxItemID)
-                {
-                    var entry = sav8bs.Items.GetItem(id);
-                    entry.Count = 1;
-                    sav8bs.Items.SetItem(id, entry);
-                }
+                    SetBdspItemCount(sav8bs, id, 1);
             }
             PocketPicker.SelectedIndex = 0;
             RefreshBagList();
@@ -580,6 +581,90 @@ public partial class MainWindow : Window
         _sav.Language = Math.Clamp((int)(LanguageSpinner.Value ?? 2), 1, 10);
 
         TrainerStatusText.Text = "Trainer info applied! Click Save (+ .bak) to write.";
+    }
+
+    private const int BdspItemSize = 0xC;
+
+    private static bool TryGetBdspItemBuffer(SAV8BS sav, out Memory<byte> buffer, out int baseOffset)
+    {
+        buffer = default;
+        baseOffset = 0;
+
+        object itemsBlock = sav.Items;
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var type = itemsBlock.GetType();
+
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            if (t.GetProperty("Raw", flags)?.GetValue(itemsBlock) is Memory<byte> rawProp && rawProp.Length >= BdspItemSize)
+            {
+                buffer = rawProp;
+                baseOffset = 0;
+                return true;
+            }
+            if (t.GetField("Raw", flags)?.GetValue(itemsBlock) is Memory<byte> rawField && rawField.Length >= BdspItemSize)
+            {
+                buffer = rawField;
+                baseOffset = 0;
+                return true;
+            }
+        }
+
+        byte[]? dataArr = null;
+        int offset = 0;
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            if (dataArr is null)
+            {
+                if (t.GetProperty("Data", flags)?.GetValue(itemsBlock) is byte[] dp)
+                    dataArr = dp;
+                else if (t.GetField("Data", flags)?.GetValue(itemsBlock) is byte[] df)
+                    dataArr = df;
+            }
+            if (offset == 0)
+            {
+                if (t.GetProperty("Offset", flags)?.GetValue(itemsBlock) is int op && op > 0)
+                    offset = op;
+                else if (t.GetField("Offset", flags)?.GetValue(itemsBlock) is int of && of > 0)
+                    offset = of;
+            }
+        }
+
+        if (dataArr is not null && offset >= 0 && offset + BdspItemSize <= dataArr.Length)
+        {
+            buffer = dataArr;
+            baseOffset = offset;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int GetBdspItemCount(SAV8BS sav, int itemId)
+    {
+        if (itemId <= 0 || !TryGetBdspItemBuffer(sav, out var buffer, out var baseOffset))
+            return 0;
+        int pos = baseOffset + (itemId * BdspItemSize);
+        if (pos < 0 || pos + BdspItemSize > buffer.Length)
+            return 0;
+        return BinaryPrimitives.ReadInt32LittleEndian(buffer.Span.Slice(pos, 4));
+    }
+
+    private static bool SetBdspItemCount(SAV8BS sav, int itemId, int count)
+    {
+        if (itemId <= 0 || !TryGetBdspItemBuffer(sav, out var buffer, out var baseOffset))
+            return false;
+        int pos = baseOffset + (itemId * BdspItemSize);
+        if (pos < 0 || pos + BdspItemSize > buffer.Length)
+            return false;
+        int clamped = Math.Clamp(count, 0, 999);
+        var slot = buffer.Span.Slice(pos, BdspItemSize);
+        BinaryPrimitives.WriteInt32LittleEndian(slot, clamped);
+        if (clamped == 0)
+            slot.Slice(4).Clear();
+        else
+            slot[4] = 1;
+        return true;
     }
 
     private static string GetSpeciesName(ushort species)
