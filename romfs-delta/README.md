@@ -1,5 +1,5 @@
-# Charizard proxy bundles
+# Mega Charizard X & Y RomFS Delta Bundles
 
-The ten bundles in this directory are byte-for-byte copies of the form 0 Charizard battle, field and common UnityFS bundles from the user's installed Luminescent Platinum 2.2F BD RomFS, renamed to candidate form 1 and form 2 paths. They provide only a temporary visual fallback. No internal asset names or dependencies have been rewritten. Loading them as form 1/2 has not been validated in game.
-
-Original RomFS: Copyright (C) 2022-2024 The Luminescent Team, GPL-3.0-or-later. See `romfs/LICENSE.txt` in the Luminescent release and https://github.com/TeamLumi/Luminescent.
+- **`pokemons/battle/pm0006_01_00` & `pm0006_01_01` (Mega Charizard X)**: Switch-targeted UnityFS v7 (`2019.4.27f1`) bundles built from `assets/mega/6-mega-x.glb`, rigged to BDSP's `pm0006_00_00` bone hierarchy in Blender, compiled in Unity 2019.4.27f1 with `MegaCharizardAssetBundleSetup.cs`, and post-processed with `LumiTool.LumiToolConsole bundle-prepper -p -c` (Switch platform + `pokemons/common/pm0006_00` animation dependency).
+- **`pokemons/battle/pm0006_02_00` & `pm0006_02_01` (Mega Charizard Y)**: Switch-targeted UnityFS v7 (`2019.4.27f1`) bundles built from `assets/mega/6-mega-y.glb` via the same Blender -> Unity 2019.4.27f1 -> LumiTool pipeline, depending on `pokemons/common/pm0006_00`.
+- **`pokemons/field/pm0006_01_*`, `pm0006_02_*`, `pokemons/common/pm0006_01`, `pm0006_02`**: Form 0 Charizard fallback bundles from Luminescent Platinum 2.2F BD RomFS (GPL-3.0-or-later, https://github.com/TeamLumi/Luminescent).
