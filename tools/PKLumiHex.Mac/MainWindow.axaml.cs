@@ -661,9 +661,15 @@ public partial class MainWindow : Window
         var slot = buffer.Span.Slice(pos, BdspItemSize);
         BinaryPrimitives.WriteInt32LittleEndian(slot, clamped);
         if (clamped == 0)
+        {
             slot.Slice(4).Clear();
+        }
         else
-            slot[4] = 1;
+        {
+            slot[4] = 1; // VanishNew = true
+            if (BinaryPrimitives.ReadUInt16LittleEndian(slot.Slice(10, 2)) == 0)
+                BinaryPrimitives.WriteUInt16LittleEndian(slot.Slice(10, 2), (ushort)Math.Clamp(itemId, 1, ushort.MaxValue));
+        }
         return true;
     }
 
