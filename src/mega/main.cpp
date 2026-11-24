@@ -680,8 +680,15 @@ inline void patchItemTableInMemory() {
 
     for (const auto& s : kAllMegaStones) {
         if (s.itemId < items->max_length) {
-            auto* iconTmpl = (s.fallbackIconId < items->max_length) ? items->m_Items[s.fallbackIconId] : nullptr;
-            applyTemplate(items->m_Items[s.itemId], charcoal, iconTmpl);
+            auto* target = items->m_Items[s.itemId];
+            const bool keepNativeIcon = ((s.itemId >= 656 && s.itemId <= 685) ||
+                                         (s.itemId >= 752 && s.itemId <= 764) ||
+                                         (s.itemId >= 767 && s.itemId <= 770)) &&
+                                        target != nullptr && target->fields.iconid > 0;
+            auto* iconTmpl = (!keepNativeIcon && s.fallbackIconId < items->max_length)
+                                 ? items->m_Items[s.fallbackIconId]
+                                 : nullptr;
+            applyTemplate(target, charcoal, iconTmpl);
         }
     }
 
@@ -755,26 +762,16 @@ inline int32_t parseTrailingItemId(System::String::Object* label) {
     return val;
 }
 
-inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, System::String::Object* label) {
-    if (label == nullptr) {
-        return nullptr;
-    }
-    const bool isItemName =
-        utf16ContainsAscii(label, "itemname_") ||
-        (fileName != nullptr && utf16ContainsAscii(fileName, "itemname"));
-    const bool isItemInfo =
-        utf16ContainsAscii(label, "iteminfo_") ||
-        (fileName != nullptr && utf16ContainsAscii(fileName, "iteminfo"));
+constexpr bool isNativeGen6MegaStone(int32_t itemId) {
+    return (itemId >= 656 && itemId <= 685) ||
+           (itemId >= 752 && itemId <= 764) ||
+           (itemId >= 767 && itemId <= 770);
+}
 
-    if (!isItemName && !isItemInfo) {
-        return nullptr;
-    }
-
-    const int32_t itemId = parseTrailingItemId(label);
+inline const char* lookupMegaItemTextById(int32_t itemId, bool isItemInfo) {
     if (itemId <= 0) {
         return nullptr;
     }
-
     if (const auto* stone = findMegaStoneCatalog(itemId); stone != nullptr) {
         return isItemInfo ? stone->stoneDesc : stone->stoneName;
     }
@@ -794,6 +791,25 @@ inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, S
             : "Key Stone";
     }
     return nullptr;
+}
+
+inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, System::String::Object* label) {
+    if (label == nullptr) {
+        return nullptr;
+    }
+    const bool isItemName =
+        utf16ContainsAscii(label, "itemname_") ||
+        (fileName != nullptr && utf16ContainsAscii(fileName, "itemname"));
+    const bool isItemInfo =
+        utf16ContainsAscii(label, "iteminfo_") ||
+        (fileName != nullptr && utf16ContainsAscii(fileName, "iteminfo"));
+
+    if (!isItemName && !isItemInfo) {
+        return nullptr;
+    }
+
+    const int32_t itemId = parseTrailingItemId(label);
+    return lookupMegaItemTextById(itemId, isItemInfo);
 }
 
 inline bool formatCustomMegaAtlasSpriteName(int32_t itemId, bool isLarge, char* outBuf, size_t bufSize) {
@@ -987,6 +1003,16 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         }
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
+        }
+        if (prmID == Pml::Item::ItemData::PrmID::INACTIVE &&
+            (mega::isMegaStone(itemno) || mega::isMegaKeyItem(itemno))) {
+            return 0;
+        }
+        if (prmID == Pml::Item::ItemData::PrmID::ICONID) {
+            if (const auto* stone = mega::findMegaStoneCatalog(itemno);
+                stone != nullptr && !mega::isNativeGen6MegaStone(itemno)) {
+                return Orig(stone->fallbackIconId, prmID);
+            }
         }
         return Orig(itemno, prmID);
     }
@@ -1240,6 +1266,39 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetNameMessage) {
     }
 };
 
+HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Index) {
+    static void Callback(Dpr::UI::UIText::Object* __this,
+                         System::String::Object* messageFile,
+                         int32_t messageIndex) {
+        Orig(__this, messageFile, messageIndex);
+        if (__this == nullptr || messageFile == nullptr || messageIndex <= 0) {
+            return;
+        }
+        const bool isItemName = mega::utf16ContainsAscii(messageFile, "itemname");
+        const bool isItemInfo = mega::utf16ContainsAscii(messageFile, "iteminfo");
+        if (!isItemName && !isItemInfo) {
+            return;
+        }
+        if (const char* custom = mega::lookupMegaItemTextById(messageIndex, isItemInfo); custom != nullptr) {
+            __this->virtual_set_text(System::String::Create(custom));
+        }
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Label) {
+    static void Callback(Dpr::UI::UIText::Object* __this,
+                         System::String::Object* messageFile,
+                         System::String::Object* messageId) {
+        Orig(__this, messageFile, messageId);
+        if (__this == nullptr || messageId == nullptr) {
+            return;
+        }
+        if (const char* custom = mega::lookupMegaItemTextByLabel(messageFile, messageId); custom != nullptr) {
+            __this->virtual_set_text(System::String::Create(custom));
+        }
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this,
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
@@ -1489,6 +1548,8 @@ void installSharedPostInitHooks() {
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
+    UIText$$SetupMessage_Label::InstallAtOffset(0x01dd18d0);
+    UIText$$SetupMessage_Index::InstallAtOffset(0x01dd1940);
 }
 } // namespace mega
 
