@@ -14,6 +14,7 @@
 #include "externals/Dpr/Battle/Logic/BtlStrType.h"
 #include "externals/Dpr/Battle/Logic/Common.h"
 #include "externals/Dpr/Battle/Logic/PokeAction.h"
+#include "externals/Dpr/Battle/Logic/PokeTypePair.h"
 #include "externals/Dpr/Battle/Logic/PokeActionCategory.h"
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
@@ -42,6 +43,7 @@
 #include "externals/Pml/PmlUse.h"
 #include "externals/Pml/Item/ItemData.h"
 #include "externals/Pml/Item/ItemManager.h"
+#include "externals/Pml/Personal/PersonalSystem.h"
 #include "externals/Pml/PokeParty.h"
 #include "externals/System/Action.h"
 #include "externals/System/String.h"
@@ -73,6 +75,9 @@ constexpr uint16_t kMegaBracelet = 744;
 constexpr uint16_t kKeyStone = 773;
 constexpr int kToughClaws = 181;
 constexpr int kDrought = 70;
+constexpr uint8_t kTypeFlying = 2;
+constexpr uint8_t kTypeFire = 9;
+constexpr uint8_t kTypeDragon = 15;
 
 constexpr uint32_t kSeUiSelect = 0xb7533038;
 constexpr uint64_t kMegaFlagBit = 34;
@@ -274,22 +279,93 @@ inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID
         reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
     }
 
+    auto asciiContainsIgnoreCase = [](const char* hay, const char* needle) -> bool {
+        if (hay == nullptr || needle == nullptr) return false;
+        const size_t hayLen = std::strlen(hay);
+        const size_t needleLen = std::strlen(needle);
+        if (needleLen == 0 || hayLen < needleLen) return false;
+        for (size_t i = 0; i <= hayLen - needleLen; ++i) {
+            bool match = true;
+            for (size_t j = 0; j < needleLen; ++j) {
+                unsigned char hc = static_cast<unsigned char>(hay[i + j]);
+                unsigned char nc = static_cast<unsigned char>(needle[j]);
+                if (hc >= 'A' && hc <= 'Z') hc = static_cast<unsigned char>(hc + ('a' - 'A'));
+                if (nc >= 'A' && nc <= 'Z') nc = static_cast<unsigned char>(nc + ('a' - 'A'));
+                if (hc != nc) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return true;
+        }
+        return false;
+    };
+
     writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", pokeID);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "targetPokeID", pokeID);
     writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
     writeFieldIfPresent<int32_t>(descObj, descClass, "tokusei", static_cast<int32_t>(nextTokusei));
-    writeFieldIfPresent<bool>(descObj, descClass, "isSameTokuseiEnable", true);
-    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayTokuseiWindow", false);
-    writeFieldIfPresent<bool>(descObj, descClass, "isTokuseiWindowDisplay", false);
-    writeFieldIfPresent<bool>(descObj, descClass, "isDisplayEffect", false);
-    writeFieldIfPresent<bool>(descObj, descClass, "isStandardMessageDisable", true);
-    writeFieldIfPresent<bool>(descObj, descClass, "isNotDisplayMessage", true);
+
+    // Suppress all ability window/effect/message boolean flags on Section_FromEvent_ChangeTokusei::Description
+    // dynamically via live IL2CPP metadata so swapping the EventFactor is 100% silent (0 popups) and
+    // ONLY the subsequent native EventID::MEMBER_IN handler (e.g. Drought) displays its single official banner.
+    if (descClass->_1.fields != nullptr) {
+        auto* fields = reinterpret_cast<const Il2CppFieldInfo*>(descClass->_1.fields);
+        for (uint16_t i = 0; i < descClass->_2.field_count; ++i) {
+            const char* fname = fields[i].name;
+            if (fname == nullptr) continue;
+            const bool isBoolPrefix =
+                (fname[0] == 'i' && fname[1] == 's' && fname[2] >= 'A' && fname[2] <= 'Z') ||
+                (fname[0] == 'f' && fname[1] >= 'A' && fname[1] <= 'Z');
+            if (!isBoolPrefix) continue;
+
+            if (asciiContainsIgnoreCase(fname, "same")) {
+                writeFieldIfPresent<bool>(descObj, descClass, fname, true);
+            } else if (asciiContainsIgnoreCase(fname, "window") ||
+                       asciiContainsIgnoreCase(fname, "disp") ||
+                       asciiContainsIgnoreCase(fname, "effect") ||
+                       asciiContainsIgnoreCase(fname, "anim") ||
+                       asciiContainsIgnoreCase(fname, "view") ||
+                       asciiContainsIgnoreCase(fname, "message") ||
+                       asciiContainsIgnoreCase(fname, "msg")) {
+                const bool isNegated =
+                    asciiContainsIgnoreCase(fname, "disable") ||
+                    asciiContainsIgnoreCase(fname, "not") ||
+                    asciiContainsIgnoreCase(fname, "skip") ||
+                    asciiContainsIgnoreCase(fname, "no");
+                writeFieldIfPresent<bool>(descObj, descClass, fname, isNegated);
+            }
+        }
+    }
 
     gInMegaTokuseiSwap = true;
     reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
         sectionChangeTokusei, resObj, &descObj, execMethod);
     gInMegaTokuseiSwap = false;
     return true;
+}
+
+// Builds a dual-type PokeTypePair preserving any extra type (Trick-or-Treat / Forest's Curse)
+// and self-verifies the bit packing against BDSP's native PokeTypePair::Split.
+inline Dpr::Battle::Logic::PokeTypePair::Object makeDualTypePair(
+    Dpr::Battle::Logic::PokeTypePair::Object origPair, uint8_t type1, uint8_t type2) {
+    Dpr::Battle::Logic::PokeTypePair::Object candidate{};
+    candidate.fields.value = static_cast<uint16_t>(
+        (type1 & 0x1F) | ((type2 & 0x1F) << 5) | (origPair.fields.value & 0xFC00));
+
+    uint8_t chk1 = 0, chk2 = 0, chkEx = 0;
+    Dpr::Battle::Logic::PokeTypePair::Split(candidate, &chk1, &chk2, &chkEx);
+    if (chk1 == type1 && chk2 == type2) {
+        return candidate;
+    }
+
+    candidate.fields.value = static_cast<uint16_t>((type1 & 0xFF) | ((type2 & 0xFF) << 8));
+    Dpr::Battle::Logic::PokeTypePair::Split(candidate, &chk1, &chk2, &chkEx);
+    if (chk1 == type1 && chk2 == type2) {
+        return candidate;
+    }
+
+    return origPair;
 }
 
 void installSharedPostInitHooks();
@@ -623,11 +699,17 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
 
-    // Now that invokeNativeChangeTokusei has registered the Mega Ability's real EventFactor
-    // (e.g. HandlerTable_Hideri for Drought), fire native MEMBER_IN_COMP so BDSP's own
-    // ability handler runs common_weather_change (Sunny Day brightening + 5-turn Harsh Sunlight).
+    // Now that invokeNativeChangeTokusei has silently registered the Mega Ability's real EventFactor
+    // (e.g. HandlerTable_Hideri for Drought), fire native MEMBER_IN (108) followed by MEMBER_IN_COMP (111).
+    // In BDSP, weather setters (Drought/Drizzle/Sand Stream/Snow Warning), terrain setters, and Intimidate
+    // listen to EventID::MEMBER_IN (108), while post-entry abilities (Zen Mode) listen to MEMBER_IN_COMP (111).
     if (msgSec != nullptr && msgSec->fields.m_pEventSystem != nullptr) {
         auto* eventSys = reinterpret_cast<Dpr::Battle::Logic::EventSystem::Object*>(msgSec->fields.m_pEventSystem);
+        eventSys->EVENTVAR_Push();
+        eventSys->EVENTVAR_SetConstValue(Dpr::Battle::Logic::EventVar::Label::POKEID, param->GetID());
+        eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN);
+        eventSys->EVENTVAR_Pop();
+
         eventSys->EVENTVAR_Push();
         eventSys->EVENTVAR_SetConstValue(Dpr::Battle::Logic::EventVar::Label::POKEID, param->GetID());
         eventSys->CallEvent(Dpr::Battle::Logic::EventID::MEMBER_IN_COMP);
@@ -677,6 +759,103 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
             const uint16_t form = __this->GetFormNo();
             if (form == mega::kMegaXForm) return static_cast<uint16_t>(mega::kToughClaws);
             if (form == mega::kMegaYForm) return static_cast<uint16_t>(mega::kDrought);
+        }
+        return Orig(__this);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
+    static XLSXContent::PersonalTable::SheetPersonal::Object* Callback(int32_t monsno, uint16_t formno) {
+        if (monsno == mega::kCharizardSpecies &&
+            (formno == mega::kMegaXForm || formno == mega::kMegaYForm)) {
+            auto* base = Orig(monsno, mega::kBaseForm);
+            if (base != nullptr && base->klass != nullptr) {
+                auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
+                    il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
+                if (clone != nullptr) {
+                    std::memcpy(&clone->fields, &base->fields,
+                                sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
+                    const auto& md = (formno == mega::kMegaXForm) ? mega::kMegaX : mega::kMegaY;
+                    clone->fields.basic_hp = static_cast<uint8_t>(md.hp);
+                    clone->fields.basic_atk = static_cast<uint8_t>(md.attack);
+                    clone->fields.basic_def = static_cast<uint8_t>(md.defense);
+                    clone->fields.basic_spatk = static_cast<uint8_t>(md.specialAttack);
+                    clone->fields.basic_spdef = static_cast<uint8_t>(md.specialDefense);
+                    clone->fields.basic_agi = static_cast<uint8_t>(md.speed);
+                    clone->fields.type1 = static_cast<uint8_t>(md.primaryType);
+                    clone->fields.type2 = static_cast<uint8_t>(md.secondaryType);
+                    clone->fields.tokusei1 = static_cast<uint16_t>(md.ability);
+                    clone->fields.tokusei2 = static_cast<uint16_t>(md.ability);
+                    clone->fields.tokusei3 = static_cast<uint16_t>(md.ability);
+                    clone->fields.weight = (formno == mega::kMegaXForm) ? 1105 : 1005;
+                    return clone;
+                }
+            }
+        }
+        return Orig(monsno, formno);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
+    static Dpr::Battle::Logic::PokeTypePair::Object Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this) {
+        auto origPair = Orig(__this);
+        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            const uint8_t form = __this->GetFormNo();
+            if (form == mega::kMegaXForm) {
+                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeDragon);
+            }
+            if (form == mega::kMegaYForm) {
+                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
+            }
+        }
+        return origPair;
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$IsMatchType) {
+    static bool Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, uint8_t type) {
+        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            const uint8_t form = __this->GetFormNo();
+            if (form == mega::kMegaXForm) {
+                uint8_t t1 = 0, t2 = 0, tEx = 0;
+                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
+                return type == mega::kTypeFire || type == mega::kTypeDragon || (tEx < 18 && type == tEx);
+            }
+            if (form == mega::kMegaYForm) {
+                uint8_t t1 = 0, t2 = 0, tEx = 0;
+                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
+                return type == mega::kTypeFire || type == mega::kTypeFlying || (tEx < 18 && type == tEx);
+            }
+        }
+        return Orig(__this, type);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType1) {
+    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+        if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
+            mega::revertMegaFormInParty();
+        }
+        if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
+            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            const uint16_t form = __this->GetFormNo();
+            if (form == mega::kMegaXForm) return mega::kTypeFire;
+            if (form == mega::kMegaYForm) return mega::kTypeFire;
+        }
+        return Orig(__this);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
+    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+        if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
+            mega::revertMegaFormInParty();
+        }
+        if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
+            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            const uint16_t form = __this->GetFormNo();
+            if (form == mega::kMegaXForm) return mega::kTypeDragon;
+            if (form == mega::kMegaYForm) return mega::kTypeFlying;
         }
         return Orig(__this);
     }
@@ -1018,7 +1197,12 @@ void installSharedPostInitHooks() {
     gPostInitHooksInstalled = true;
 
     BTL_POKEPARAM$$GetValue::InstallAtOffset(0x01fdd010);
+    BTL_POKEPARAM$$GetPokeType::InstallAtOffset(0x01fdfa80);
+    BTL_POKEPARAM$$IsMatchType::InstallAtOffset(0x01fdfad0);
     CoreParam$$GetTokuseiNo::InstallAtOffset(0x020488a0);
+    CoreParam$$GetType1::InstallAtOffset(0x0204a9f0);
+    CoreParam$$GetType2::InstallAtOffset(0x0204aaf0);
+    PersonalSystem$$GetPersonalData::InstallAtOffset(0x024a0ca0);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
