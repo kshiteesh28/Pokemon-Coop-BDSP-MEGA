@@ -88,9 +88,25 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
         raise ValueError("Could not find pokemons/battle/pm0006_00_00 in Dpr.bin")
     battle_datetime = data[b_idx + len(b"pokemons/battle/pm0006_00_00") + 25 : b_idx + len(b"pokemons/battle/pm0006_00_00") + 33]
 
+    # Dynamically look up each species' vanilla battle allDependencies ID in Dpr.bin
+    def find_battle_deps_id(species_prefix: str) -> int:
+        m = f"pokemons/battle/{species_prefix}_00_00".encode("utf-8")
+        p = data.find(m)
+        if p == -1:
+            raise ValueError(f"Could not find {m.decode()} in Dpr.bin")
+        dp = p + len(m) + 25 + 8 + 1
+        if data[dp] != 0x09:
+            raise ValueError(f"Expected MemberReference (0x09) for {species_prefix} battle allDependencies")
+        return struct.unpack_from("<I", data, dp + 1)[0]
+
+    charizard_deps_id = find_battle_deps_id("pm0006")
+    absol_deps_id = find_battle_deps_id("pm0359")
+
     entries = [
-        ("pokemons/battle/pm0006_01_00", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", BATTLE_DEPS_ID),
-        ("pokemons/battle/pm0006_02_00", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", BATTLE_DEPS_ID),
+        ("pokemons/battle/pm0006_01_00", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", charizard_deps_id),
+        ("pokemons/battle/pm0006_02_00", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", charizard_deps_id),
+        ("pokemons/battle/pm0359_01_00", "assets/pokemons/battle/pm0359/pm0359_01_00.prefab", absol_deps_id),
+        ("pokemons/battle/pm0359_02_00", "assets/pokemons/battle/pm0359/pm0359_02_00.prefab", absol_deps_id),
     ]
 
     # Guard against AssetBundleDownloadManifest.BuildLookupTables() Dictionary.Add duplicate-key crashes

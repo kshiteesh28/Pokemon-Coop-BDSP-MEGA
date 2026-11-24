@@ -61,72 +61,166 @@
 
 namespace mega {
 constexpr int kCharizardSpecies = 6;
+constexpr int kAbsolSpecies = 359;
 constexpr int kBaseForm = 0;
 constexpr int kMegaXForm = 1;
 constexpr int kMegaYForm = 2;
+constexpr int kMegaAbsolForm = 1;
+constexpr int kMegaAbsolZForm = 2;
 
 // Verified item indices from src/mod/data/items.h (line - 4).
-constexpr uint16_t kFireStone = 82;       // Fallback BDSP stone icon sprite
+constexpr uint16_t kFireStone = 82;       // Fallback BDSP stone icon sprite (Charizardite)
+constexpr uint16_t kDuskStone = 108;      // Fallback BDSP stone icon sprite (Absolite / Absolite Z)
 constexpr uint16_t kOddKeystone = 111;    // Fallback BDSP keystone icon sprite
 constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket (field_func = 0)
 constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (field_func = 0)
+constexpr uint16_t kAbsoliteZ = 622;      // Safe unused ItemTable slot ("622", < kKeyStone)
 constexpr uint16_t kCharizarditeX = 660;
+constexpr uint16_t kAbsolite = 677;
 constexpr uint16_t kCharizarditeY = 678;
 constexpr uint16_t kMegaRing = 696;
 constexpr uint16_t kMegaBracelet = 744;
 constexpr uint16_t kKeyStone = 773;
-constexpr int kToughClaws = 181;
+
+// Verified ability IDs from src/mod/data/abilities.h (line - 4).
 constexpr int kDrought = 70;
+constexpr int kMagicBounce = 156;
+constexpr int kToughClaws = 181;
+constexpr int kSharpness = 292;           // Registered natively in Luminescent Platinum sharpness.cpp
+
+// Verified type IDs from src/mod/data/types.h.
 constexpr uint8_t kTypeFlying = 2;
+constexpr uint8_t kTypeGhost = 7;
 constexpr uint8_t kTypeFire = 9;
 constexpr uint8_t kTypeDragon = 15;
+constexpr uint8_t kTypeDark = 16;
 
 constexpr uint32_t kSeUiSelect = 0xb7533038;
 constexpr uint64_t kMegaFlagBit = 34;
 constexpr uint64_t kMegaFlagMask = 1ULL << kMegaFlagBit;
 
-struct MegaFormData {
+struct MegaSpeciesEntry {
+    int species;
     int form;
+    uint16_t stoneItemId;
+    uint16_t fallbackIconId;
     int hp, attack, defense, specialAttack, specialDefense, speed;
     int ability;
-    int primaryType, secondaryType;
+    uint8_t primaryType, secondaryType;
+    uint16_t weight;
+    const char* bundleName;
+    const char* bannerReady;
+    const char* bannerArmed;
+    const char* reactMessage;
+    const char* evoMessage;
+    const char* itemIdStr;
+    const char* stoneName;
+    const char* stoneDesc;
 };
-constexpr MegaFormData kMegaX{1, 78, 130, 111, 130, 85, 100, kToughClaws, 9, 15};
-constexpr MegaFormData kMegaY{2, 78, 104, 78, 159, 115, 100, kDrought, 9, 2};
 
-constexpr int charizardMegaForm(int species, int originalForm,
-                                int heldItem, int charizarditeX,
-                                int charizarditeY, bool hasMegaAccessoryInBag,
-                                bool trainerAlreadyMegaEvolved) {
-    if (species != kCharizardSpecies || originalForm != kBaseForm ||
-        !hasMegaAccessoryInBag || trainerAlreadyMegaEvolved) {
-        return -1;
+constexpr MegaSpeciesEntry kMegaRegistry[] = {
+    {
+        kCharizardSpecies, kMegaXForm, kCharizarditeX, kFireStone,
+        78, 130, 111, 130, 85, 100, kToughClaws, kTypeFire, kTypeDragon, 1105,
+        "pm0006_01_00", "[R] MEGA EVOLVE X", "MEGA X ACTIVE",
+        "Charizard's Charizardite X is reacting to your Mega Ring!",
+        "Charizard has Mega Evolved into Mega Charizard X!",
+        "660", "Charizardite X",
+        "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
+    },
+    {
+        kCharizardSpecies, kMegaYForm, kCharizarditeY, kFireStone,
+        78, 104, 78, 159, 115, 100, kDrought, kTypeFire, kTypeFlying, 1005,
+        "pm0006_02_00", "[R] MEGA EVOLVE Y", "MEGA Y ACTIVE",
+        "Charizard's Charizardite Y is reacting to your Mega Ring!",
+        "Charizard has Mega Evolved into Mega Charizard Y!",
+        "678", "Charizardite Y",
+        "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
+    },
+    {
+        kAbsolSpecies, kMegaAbsolForm, kAbsolite, kDuskStone,
+        65, 150, 60, 115, 60, 115, kMagicBounce, kTypeDark, kTypeDark, 490,
+        "pm0359_01_00", "[R] MEGA EVOLVE", "MEGA ABSOL ACTIVE",
+        "Absol's Absolite is reacting to your Mega Ring!",
+        "Absol has Mega Evolved into Mega Absol!",
+        "677", "Absolite",
+        "One of a variety of mysterious Mega Stones. Have Absol hold it, and this stone will enable it to Mega Evolve during battle."
+    },
+    {
+        kAbsolSpecies, kMegaAbsolZForm, kAbsoliteZ, kDuskStone,
+        65, 154, 60, 75, 60, 151, kSharpness, kTypeDark, kTypeGhost, 470,
+        "pm0359_02_00", "[R] MEGA EVOLVE Z", "MEGA ABSOL Z ACTIVE",
+        "Absol's Absolite Z is reacting to your Mega Ring!",
+        "Absol has Mega Evolved into Mega Absol Z!",
+        "622", "Absolite Z",
+        "One of a variety of mysterious Mega Stones. An Absol holding this stone will be able to Mega Evolve into Mega Absol Z during battle."
+    },
+};
+
+constexpr const MegaSpeciesEntry* findMegaByStone(int species, int originalForm, int heldItem) {
+    if (originalForm != kBaseForm) return nullptr;
+    for (const auto& e : kMegaRegistry) {
+        if (e.species == species && static_cast<int>(e.stoneItemId) == heldItem) {
+            return &e;
+        }
     }
-    if (heldItem == charizarditeX && charizarditeX != charizarditeY)
-        return kMegaXForm;
-    if (heldItem == charizarditeY && charizarditeX != charizarditeY)
-        return kMegaYForm;
+    return nullptr;
+}
+
+constexpr const MegaSpeciesEntry* findMegaByForm(int species, int formNo) {
+    for (const auto& e : kMegaRegistry) {
+        if (e.species == species && e.form == formNo) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+constexpr const MegaSpeciesEntry* findMegaByItemId(int32_t itemId) {
+    for (const auto& e : kMegaRegistry) {
+        if (static_cast<int32_t>(e.stoneItemId) == itemId) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+constexpr bool isSupportedMegaSpecies(int species) {
+    for (const auto& e : kMegaRegistry) {
+        if (e.species == species) return true;
+    }
+    return false;
+}
+
+constexpr int resolveMegaForm(int species, int originalForm, int heldItem,
+                              bool hasMegaAccessoryInBag, bool trainerAlreadyMegaEvolved) {
+    if (!hasMegaAccessoryInBag || trainerAlreadyMegaEvolved) return -1;
+    if (const auto* entry = findMegaByStone(species, originalForm, heldItem); entry != nullptr) {
+        return entry->form;
+    }
     return -1;
 }
 
-static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, true, false) == kMegaXForm);
-static_assert(charizardMegaForm(6, 0, kCharizarditeY, kCharizarditeX, kCharizarditeY, true, false) == kMegaYForm);
-static_assert(charizardMegaForm(6, 0, 679, kCharizarditeX, kCharizarditeY, true, false) == -1);
-static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, false, false) == -1);
-static_assert(charizardMegaForm(6, 0, kCharizarditeX, kCharizarditeX, kCharizarditeY, true, true) == -1);
-static_assert(kMegaRing == 696);
-static_assert(kMegaBracelet == 744);
-static_assert(kKeyStone == 773);
-static_assert(kMegaX.ability == kToughClaws && kMegaY.ability == kDrought);
+static_assert(resolveMegaForm(6, 0, kCharizarditeX, true, false) == kMegaXForm);
+static_assert(resolveMegaForm(6, 0, kCharizarditeY, true, false) == kMegaYForm);
+static_assert(resolveMegaForm(359, 0, kAbsolite, true, false) == kMegaAbsolForm);
+static_assert(resolveMegaForm(359, 0, kAbsoliteZ, true, false) == kMegaAbsolZForm);
+static_assert(resolveMegaForm(359, 0, kCharizarditeX, true, false) == -1);
+static_assert(resolveMegaForm(6, 0, kAbsolite, true, false) == -1);
+static_assert(resolveMegaForm(359, 0, kAbsoliteZ, false, false) == -1);
+static_assert(resolveMegaForm(359, 0, kAbsoliteZ, true, true) == -1);
+static_assert(kAbsolite == 677 && kAbsoliteZ == 622);
+static_assert(kMagicBounce == 156 && kSharpness == 292);
 
 bool gPostInitHooksInstalled = false;
 bool gItemTablePatched = false;
 bool gMegaBattleAllowed = true;
 bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
+int gActiveMegaSpecies = 0;
 int gActiveMegaForm = 0;
 bool gInMegaTokuseiSwap = false;
-uint16_t gPreMegaTokusei = 66; // Saved dynamically before Mega Evolution (default Blaze)
+uint16_t gPreMegaTokusei = 66;
 uint8_t gMegaBattlePokeID = 0xFF;
 
 inline bool isBattleEnded() {
@@ -149,17 +243,17 @@ inline void revertMegaFormInParty() {
             if (member == nullptr || member->IsNull()) {
                 continue;
             }
-            if (member->GetMonsNo() == kCharizardSpecies) {
-                const uint16_t form = member->GetFormNo();
-                if (form == kMegaXForm || form == kMegaYForm) {
-                    member->ChangeFormNo(kBaseForm, nullptr);
-                    if (member->fields.m_accessor != nullptr) {
-                        member->fields.m_accessor->SetTokuseiNo(gPreMegaTokusei);
-                    }
+            const int monsNo = member->GetMonsNo();
+            const uint16_t form = member->GetFormNo();
+            if (findMegaByForm(monsNo, form) != nullptr) {
+                member->ChangeFormNo(kBaseForm, nullptr);
+                if (member->fields.m_accessor != nullptr) {
+                    member->fields.m_accessor->SetTokuseiNo(gPreMegaTokusei);
                 }
             }
         }
     }
+    gActiveMegaSpecies = 0;
     gActiveMegaForm = 0;
     gMegaArmed = false;
     gMegaBattlePokeID = 0xFF;
@@ -201,9 +295,6 @@ inline Dpr::Battle::Logic::EventFactor::EventHandlerTable::Array* resolveAbility
 }
 
 // Silently hot-swaps a Pokemon's live Ability EventFactor in-place inside BattleEnv::m_eventFactorContainer.
-// Avoids Section_FromEvent_ChangeTokusei entirely (which emits duplicate Skill-Swap banners and fails on
-// mismatched Description field widths), causes zero allocations/leaks, and lets native EventID::MEMBER_IN
-// trigger the Mega Ability (e.g. Drought -> 1 official banner + Sunny Day brightening + 5-turn Harsh Sunlight).
 inline bool swapAbilityEventFactorInPlace(Dpr::Battle::Logic::BattleEnv::Object* battleEnv,
                                           uint8_t pokeID,
                                           uint16_t prevTokusei,
@@ -311,8 +402,7 @@ inline bool swapAbilityEventFactorInPlace(Dpr::Battle::Logic::BattleEnv::Object*
     return scanContainerObject(containerObj, 0, scanContainerObject);
 }
 
-// Builds a dual-type PokeTypePair preserving any extra type (Trick-or-Treat / Forest's Curse)
-// by dynamically probing MakePure + Split so the exact BDSP bit-shift layout is 100% verified.
+// Builds a dual-type PokeTypePair preserving any extra type (Trick-or-Treat / Forest's Curse).
 inline Dpr::Battle::Logic::PokeTypePair::Object makeDualTypePair(
     Dpr::Battle::Logic::PokeTypePair::Object origPair, uint8_t type1, uint8_t type2) {
     using namespace Dpr::Battle::Logic;
@@ -375,14 +465,13 @@ inline Dpr::Battle::Logic::PokeTypePair::Object makeDualTypePair(
 void installSharedPostInitHooks();
 
 inline bool isMegaStone(int32_t itemId) {
-    return itemId == kCharizarditeX || itemId == kCharizarditeY;
+    return findMegaByItemId(itemId) != nullptr;
 }
 
 inline bool isMegaKeyItem(int32_t itemId) {
     return itemId == kMegaBracelet || itemId == kMegaRing || itemId == kKeyStone;
 }
 
-// Returns the Mega accessory item ID owned in the Bag, or 0 if none is owned.
 inline uint16_t ownedMegaAccessoryInBag() {
     PlayerWork::getClass()->initIfNeeded();
     if (PlayerWork::GetItem(kMegaRing).fields.Count > 0) return kMegaRing;
@@ -395,8 +484,7 @@ inline bool hasMegaAccessoryInBag() {
     return ownedMegaAccessoryInBag() != 0;
 }
 
-// Patch only the 5 Mega rows in the loaded master ItemTable once.
-// Zero hooks on UIBag, ItemWork::GetItemInfo, or UIText so Bag A/B/X/Y input is untouched.
+// Patch only the registered Mega Stone & Key Item rows in the loaded master ItemTable once.
 inline void patchItemTableInMemory() {
     if (gItemTablePatched) {
         return;
@@ -423,7 +511,6 @@ inline void patchItemTableInMemory() {
 
     auto* charcoal = items->m_Items[kCharcoal];
     auto* magmaStone = items->m_Items[kMagmaStone];
-    auto* fireStone = items->m_Items[kFireStone];
     auto* oddKeystone = items->m_Items[kOddKeystone];
     if (charcoal == nullptr || magmaStone == nullptr) {
         return;
@@ -450,8 +537,12 @@ inline void patchItemTableInMemory() {
         }
     };
 
-    applyTemplate(items->m_Items[kCharizarditeX], charcoal, fireStone);
-    applyTemplate(items->m_Items[kCharizarditeY], charcoal, fireStone);
+    for (const auto& e : kMegaRegistry) {
+        if (e.stoneItemId < items->max_length && e.fallbackIconId < items->max_length) {
+            applyTemplate(items->m_Items[e.stoneItemId], charcoal, items->m_Items[e.fallbackIconId]);
+        }
+    }
+
     applyTemplate(items->m_Items[kMegaBracelet], magmaStone, oddKeystone);
     applyTemplate(items->m_Items[kMegaRing], magmaStone, oddKeystone);
     applyTemplate(items->m_Items[kKeyStone], magmaStone, oddKeystone);
@@ -503,15 +594,10 @@ inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, S
         return nullptr;
     }
 
-    if (utf16ContainsAscii(label, "660")) {
-        return isItemInfo
-            ? "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
-            : "Charizardite X";
-    }
-    if (utf16ContainsAscii(label, "678")) {
-        return isItemInfo
-            ? "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle."
-            : "Charizardite Y";
+    for (const auto& e : kMegaRegistry) {
+        if (utf16ContainsAscii(label, e.itemIdStr)) {
+            return isItemInfo ? e.stoneDesc : e.stoneName;
+        }
     }
     if (utf16ContainsAscii(label, "696")) {
         return isItemInfo
@@ -533,7 +619,9 @@ inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, S
 
 inline const char* customMegaAtlasSpriteName(int32_t itemId, bool isLarge) {
     switch (itemId) {
+        case kAbsoliteZ:     return isLarge ? "item_0622_L" : "item_0622";
         case kCharizarditeX: return isLarge ? "item_0660_L" : "item_0660";
+        case kAbsolite:      return isLarge ? "item_0677_L" : "item_0677";
         case kCharizarditeY: return isLarge ? "item_0678_L" : "item_0678";
         case kMegaRing:      return isLarge ? "item_0696_L" : "item_0696";
         case kMegaBracelet:  return isLarge ? "item_0744_L" : "item_0744";
@@ -546,19 +634,11 @@ inline bool getMegaFlag(const Dpr::Battle::Logic::BTL_ACTION_PARAM::Object& para
     return ((static_cast<uint64_t>(param.fields.raw) >> kMegaFlagBit) & 1ULL) != 0;
 }
 
-inline int targetCharizardMegaForm(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
-    if (pokeParam == nullptr || !gMegaBattleAllowed) {
-        return -1;
+inline const MegaSpeciesEntry* targetMegaEntry(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
+    if (pokeParam == nullptr || !gMegaBattleAllowed || !hasMegaAccessoryInBag() || gMegaUsedThisBattle) {
+        return nullptr;
     }
-    return charizardMegaForm(
-        pokeParam->GetMonsNo(),
-        pokeParam->GetFormNo(),
-        pokeParam->GetItem(),
-        kCharizarditeX,
-        kCharizarditeY,
-        hasMegaAccessoryInBag(),
-        gMegaUsedThisBattle
-    );
+    return findMegaByStone(pokeParam->GetMonsNo(), pokeParam->GetFormNo(), pokeParam->GetItem());
 }
 
 inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
@@ -567,15 +647,11 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     }
 
     auto* bpp = wazaList->fields._btlPokeParam;
-    const bool isBaseCharizard = (bpp->GetMonsNo() == kCharizardSpecies && bpp->GetFormNo() == kBaseForm);
-    const bool hasStone = isMegaStone(bpp->GetItem());
+    const auto* stoneMatch = findMegaByStone(bpp->GetMonsNo(), bpp->GetFormNo(), bpp->GetItem());
     const bool hasRing = hasMegaAccessoryInBag();
-    const int targetForm = targetCharizardMegaForm(bpp);
-    const bool eligible = targetForm > 0;
+    const auto* entry = targetMegaEntry(bpp);
+    const bool eligible = entry != nullptr;
 
-    // Always display the Mega Evolution button pill in every battle:
-    // - Active & choosable (cyan -> magenta-gold) only when the Pokémon can Mega Evolve and Mega Ring is in Bag.
-    // - Visible but dimmed/inactive (grey) for all other Pokémon or when Mega Ring / Stone is missing.
     if (wazaList->fields._yButtonText != nullptr) {
         auto* promptText = reinterpret_cast<Dpr::UI::UIText::Object*>(wazaList->fields._yButtonText);
         const char* label = "MEGA EVOLVE (OFF)";
@@ -583,12 +659,12 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
         textColor.fields = { .r = 0.65f, .g = 0.65f, .b = 0.70f, .a = 1.0f };
 
         if (eligible && gMegaArmed) {
-            label = (targetForm == kMegaXForm) ? "MEGA X ACTIVE" : "MEGA Y ACTIVE";
+            label = entry->bannerArmed;
             textColor.fields = { .r = 1.0f, .g = 0.92f, .b = 0.20f, .a = 1.0f };
         } else if (eligible) {
-            label = (targetForm == kMegaXForm) ? "[R] MEGA EVOLVE X" : "[R] MEGA EVOLVE Y";
+            label = entry->bannerReady;
             textColor.fields = { .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f };
-        } else if (isBaseCharizard && hasStone && !hasRing && !gMegaUsedThisBattle) {
+        } else if (stoneMatch != nullptr && !hasRing && !gMegaUsedThisBattle) {
             label = "MEGA (Need Ring)";
             textColor.fields = { .r = 1.0f, .g = 0.65f, .b = 0.35f, .a = 1.0f };
         } else if (gMegaUsedThisBattle) {
@@ -629,8 +705,8 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     }
 }
 
-void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* container,
-                                   Dpr::Battle::Logic::PokeAction::Object* pokeAction) {
+void executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* container,
+                          Dpr::Battle::Logic::PokeAction::Object* pokeAction) {
     if (container == nullptr || pokeAction == nullptr) {
         return;
     }
@@ -641,19 +717,19 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     Dpr::Battle::Logic::Common::getClass()->initIfNeeded();
 
     auto* param = pokeAction->fields.bpp;
-    const int targetForm = targetCharizardMegaForm(param);
-    if (targetForm <= 0) {
+    const auto* entry = targetMegaEntry(param);
+    if (entry == nullptr) {
         return;
     }
 
     gPreMegaTokusei = param->fields.m_tokusei;
-    gActiveMegaForm = targetForm;
+    gActiveMegaSpecies = entry->species;
+    gActiveMegaForm = entry->form;
     gMegaBattlePokeID = param->GetID();
 
     const uint16_t accessoryId = ownedMegaAccessoryInBag();
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
 
-    // ORAS-style start sentence: "[Charizard]'s Charizardite X/Y is reacting to [Player]'s Mega Ring!"
     auto* msgDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
     msgDesc->fields.pokeID = param->GetID();
     msgDesc->fields.isDisplayTokuseiWindow = false;
@@ -666,10 +742,9 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
     container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
 
-    // Trigger BDSP's native form-change light-burst transformation animation & stay Mega on switch-out.
     auto* formDesc = Dpr::Battle::Logic::Section_FromEvent_FormChange::Description::newInstance();
     formDesc->fields.pokeID = param->GetID();
-    formDesc->fields.formNo = static_cast<uint8_t>(targetForm);
+    formDesc->fields.formNo = static_cast<uint8_t>(entry->form);
     formDesc->fields.isDontResetFormByOut = true;
     formDesc->fields.isEnableInCaseOfDead = false;
     formDesc->fields.isDisplayTokuseiWindow = false;
@@ -682,8 +757,7 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
     container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
 
-    // Update BTL_POKEPARAM, CoreParam/Accessor, and BattleView client info to the Mega Ability.
-    const uint16_t megaAbility = static_cast<uint16_t>(targetForm == kMegaXForm ? kToughClaws : kDrought);
+    const uint16_t megaAbility = static_cast<uint16_t>(entry->ability);
     param->fields.m_tokusei = megaAbility;
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
@@ -697,9 +771,6 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
 
-    // Silently hot-swap Charizard's live Ability EventFactor in-place (Blaze -> Drought / Tough Claws)
-    // without calling Section_FromEvent_ChangeTokusei, then fire native MEMBER_IN (108) + MEMBER_IN_COMP (111)
-    // so Drought displays exactly 1 official banner and immediately activates Harsh Sunlight + 3D brightening.
     if (msgSec != nullptr && msgSec->fields.m_pBattleEnv != nullptr) {
         auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(msgSec->fields.m_pBattleEnv);
         swapAbilityEventFactorInPlace(battleEnv, param->GetID(), gPreMegaTokusei, megaAbility);
@@ -741,10 +812,8 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
         if (!mega::gInMegaTokuseiSwap && __this != nullptr &&
             (vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI ||
              vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI_EFFECTIVE)) {
-            if (__this->GetMonsNo() == mega::kCharizardSpecies) {
-                const uint8_t form = __this->GetFormNo();
-                if (form == mega::kMegaXForm) return mega::kToughClaws;
-                if (form == mega::kMegaYForm) return mega::kDrought;
+            if (const auto* entry = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); entry != nullptr) {
+                return entry->ability;
             }
         }
         return Orig(__this, vid);
@@ -756,11 +825,10 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (!mega::gInMegaTokuseiSwap && mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
-            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
-            const uint16_t form = __this->GetFormNo();
-            if (form == mega::kMegaXForm) return static_cast<uint16_t>(mega::kToughClaws);
-            if (form == mega::kMegaYForm) return static_cast<uint16_t>(mega::kDrought);
+        if (!mega::gInMegaTokuseiSwap && mega::gActiveMegaForm > 0 && !mega::isBattleEnded() && __this != nullptr) {
+            if (const auto* entry = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); entry != nullptr) {
+                return static_cast<uint16_t>(entry->ability);
+            }
         }
         return Orig(__this);
     }
@@ -768,36 +836,34 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
 
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
     static XLSXContent::PersonalTable::SheetPersonal::Object* Callback(int32_t monsno, uint16_t formno) {
-        if (monsno == mega::kCharizardSpecies) {
+        if (mega::isSupportedMegaSpecies(monsno)) {
             auto* base = Orig(monsno, mega::kBaseForm);
             if (base != nullptr) {
-                // Luminescent Platinum changes base Charizard (form 0) to Fire/Dragon in romfs.
-                // Enforce standard Fire/Flying for base Charizard (form 0) and Mega Charizard Y (form 2),
-                // and Fire/Dragon exclusively for Mega Charizard X (form 1).
                 if (formno == mega::kBaseForm) {
-                    base->fields.type1 = mega::kTypeFire;
-                    base->fields.type2 = mega::kTypeFlying;
+                    if (monsno == mega::kCharizardSpecies) {
+                        base->fields.type1 = mega::kTypeFire;
+                        base->fields.type2 = mega::kTypeFlying;
+                    }
                     return base;
                 }
-                if ((formno == mega::kMegaXForm || formno == mega::kMegaYForm) && base->klass != nullptr) {
+                if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr && base->klass != nullptr) {
                     auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
                         il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
                     if (clone != nullptr) {
                         std::memcpy(&clone->fields, &base->fields,
                                     sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
-                        const auto& md = (formno == mega::kMegaXForm) ? mega::kMegaX : mega::kMegaY;
-                        clone->fields.basic_hp = static_cast<uint8_t>(md.hp);
-                        clone->fields.basic_atk = static_cast<uint8_t>(md.attack);
-                        clone->fields.basic_def = static_cast<uint8_t>(md.defense);
-                        clone->fields.basic_spatk = static_cast<uint8_t>(md.specialAttack);
-                        clone->fields.basic_spdef = static_cast<uint8_t>(md.specialDefense);
-                        clone->fields.basic_agi = static_cast<uint8_t>(md.speed);
-                        clone->fields.type1 = static_cast<uint8_t>(md.primaryType);
-                        clone->fields.type2 = static_cast<uint8_t>(md.secondaryType);
-                        clone->fields.tokusei1 = static_cast<uint16_t>(md.ability);
-                        clone->fields.tokusei2 = static_cast<uint16_t>(md.ability);
-                        clone->fields.tokusei3 = static_cast<uint16_t>(md.ability);
-                        clone->fields.weight = (formno == mega::kMegaXForm) ? 1105 : 1005;
+                        clone->fields.basic_hp = static_cast<uint8_t>(md->hp);
+                        clone->fields.basic_atk = static_cast<uint8_t>(md->attack);
+                        clone->fields.basic_def = static_cast<uint8_t>(md->defense);
+                        clone->fields.basic_spatk = static_cast<uint8_t>(md->specialAttack);
+                        clone->fields.basic_spdef = static_cast<uint8_t>(md->specialDefense);
+                        clone->fields.basic_agi = static_cast<uint8_t>(md->speed);
+                        clone->fields.type1 = md->primaryType;
+                        clone->fields.type2 = md->secondaryType;
+                        clone->fields.tokusei1 = static_cast<uint16_t>(md->ability);
+                        clone->fields.tokusei2 = static_cast<uint16_t>(md->ability);
+                        clone->fields.tokusei3 = static_cast<uint16_t>(md->ability);
+                        clone->fields.weight = md->weight;
                         return clone;
                     }
                 }
@@ -810,7 +876,7 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
     static void Callback(int32_t monsno, uint16_t formno) {
         Orig(monsno, formno);
-        if (monsno == mega::kCharizardSpecies) {
+        if (mega::isSupportedMegaSpecies(monsno)) {
             if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
                 pClass != nullptr && pClass->static_fields != nullptr) {
                 if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno); patched != nullptr) {
@@ -824,12 +890,15 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
     static Dpr::Battle::Logic::PokeTypePair::Object Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this) {
         auto origPair = Orig(__this);
-        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (__this != nullptr) {
+            const int monsNo = __this->GetMonsNo();
             const uint8_t form = __this->GetFormNo();
-            if (form == mega::kMegaXForm) {
-                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeDragon);
+            if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
+                return mega::makeDualTypePair(origPair, md->primaryType, md->secondaryType);
             }
-            return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
+            if (monsNo == mega::kCharizardSpecies) {
+                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
+            }
         }
         return origPair;
     }
@@ -837,12 +906,19 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
 
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$IsMatchType) {
     static bool Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, uint8_t type) {
-        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (__this != nullptr) {
+            const int monsNo = __this->GetMonsNo();
             const uint8_t form = __this->GetFormNo();
-            uint8_t t1 = 0, t2 = 0, tEx = 0;
-            Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
-            const uint8_t secondType = (form == mega::kMegaXForm) ? mega::kTypeDragon : mega::kTypeFlying;
-            return type == mega::kTypeFire || type == secondType || (tEx < 18 && type == tEx);
+            if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
+                uint8_t t1 = 0, t2 = 0, tEx = 0;
+                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
+                return type == md->primaryType || type == md->secondaryType || (tEx < 18 && type == tEx);
+            }
+            if (monsNo == mega::kCharizardSpecies) {
+                uint8_t t1 = 0, t2 = 0, tEx = 0;
+                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
+                return type == mega::kTypeFire || type == mega::kTypeFlying || (tEx < 18 && type == tEx);
+            }
         }
         return Orig(__this, type);
     }
@@ -853,8 +929,17 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType1) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
-            return mega::kTypeFire;
+        if (__this != nullptr) {
+            const int monsNo = __this->GetMonsNo();
+            const uint16_t form = __this->GetFormNo();
+            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
+                if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
+                    return md->primaryType;
+                }
+            }
+            if (monsNo == mega::kCharizardSpecies) {
+                return mega::kTypeFire;
+            }
         }
         return Orig(__this);
     }
@@ -865,12 +950,17 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (__this != nullptr) {
+            const int monsNo = __this->GetMonsNo();
             const uint16_t form = __this->GetFormNo();
-            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() && form == mega::kMegaXForm) {
-                return mega::kTypeDragon;
+            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
+                if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
+                    return md->secondaryType;
+                }
             }
-            return mega::kTypeFlying;
+            if (monsNo == mega::kCharizardSpecies) {
+                return mega::kTypeFlying;
+            }
         }
         return Orig(__this);
     }
@@ -878,7 +968,7 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
 
 HOOK_DEFINE_TRAMPOLINE(CheckUnbreakablePokeItem) {
     static bool Callback(uint16_t monsno, uint16_t itemID) {
-        if (monsno == mega::kCharizardSpecies && mega::isMegaStone(itemID)) {
+        if (mega::findMegaByStone(monsno, mega::kBaseForm, itemID) != nullptr) {
             return true;
         }
         return Orig(monsno, itemID);
@@ -888,8 +978,7 @@ HOOK_DEFINE_TRAMPOLINE(CheckUnbreakablePokeItem) {
 HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     static XLSXContent::PokemonInfo::SheetCatalog::Object* Callback(
         int32_t monsNo, int32_t formNo, Pml::Sex sex, bool isRare, bool isEgg, const void* methodInfo) {
-        if (monsNo == mega::kCharizardSpecies &&
-            (formNo == mega::kMegaXForm || formNo == mega::kMegaYForm)) {
+        if (const auto* md = mega::findMegaByForm(monsNo, formNo); md != nullptr) {
             auto* base = Orig(monsNo, mega::kBaseForm, sex, isRare, isEgg, methodInfo);
             if (base != nullptr && base->klass != nullptr) {
                 auto* clone = reinterpret_cast<XLSXContent::PokemonInfo::SheetCatalog::Object*>(
@@ -899,10 +988,7 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
                                 sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields));
                     clone->fields.FormNo = formNo;
                     clone->fields.Rare = isRare;
-                    const char* bundleName = (formNo == mega::kMegaXForm)
-                        ? "pm0006_01_00"
-                        : "pm0006_02_00";
-                    clone->fields.AssetBundleName = System::String::Create(bundleName);
+                    clone->fields.AssetBundleName = System::String::Create(md->bundleName);
                     return clone;
                 }
             }
@@ -924,7 +1010,10 @@ HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
                     return;
                 }
             }
-            const int32_t fallbackId = mega::isMegaStone(itemId) ? mega::kFireStone : mega::kOddKeystone;
+            int32_t fallbackId = mega::kOddKeystone;
+            if (const auto* md = mega::findMegaByItemId(itemId); md != nullptr) {
+                fallbackId = md->fallbackIconId;
+            }
             Orig(fallbackId, onLoadedCallback, isUnload, isLarge);
             return;
         }
@@ -937,17 +1026,13 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                                             System::String::Object* fileName,
                                             System::String::Object* label) {
         if (mega::gActiveMegaForm > 0 && label != nullptr) {
-            if (mega::utf16ContainsAscii(label, "1572") || mega::utf16ContainsAscii(label, "megaevostart")) {
-                return System::String::Create(
-                    mega::gActiveMegaForm == mega::kMegaXForm
-                        ? "Charizard's Charizardite X is reacting to your Mega Ring!"
-                        : "Charizard's Charizardite Y is reacting to your Mega Ring!");
-            }
-            if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
-                return System::String::Create(
-                    mega::gActiveMegaForm == mega::kMegaXForm
-                        ? "Charizard has Mega Evolved into Mega Charizard X!"
-                        : "Charizard has Mega Evolved into Mega Charizard Y!");
+            if (const auto* md = mega::findMegaByForm(mega::gActiveMegaSpecies, mega::gActiveMegaForm); md != nullptr) {
+                if (mega::utf16ContainsAscii(label, "1572") || mega::utf16ContainsAscii(label, "megaevostart")) {
+                    return System::String::Create(md->reactMessage);
+                }
+                if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
+                    return System::String::Create(md->evoMessage);
+                }
             }
         }
         if (const char* custom = mega::lookupMegaItemTextByLabel(fileName, label); custom != nullptr) {
@@ -973,7 +1058,7 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
                          uint8_t pokeIndex,
                          Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest) {
-        const bool eligible = mega::targetCharizardMegaForm(bpp) > 0;
+        const bool eligible = mega::targetMegaEntry(bpp) != nullptr;
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
 
         Orig(__this, bpp, pokeIndex, dest);
@@ -985,7 +1070,7 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
-        const bool eligible = mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0;
+        const bool eligible = mega::targetMegaEntry(__this->fields._btlPokeParam) != nullptr;
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
 
         Orig(__this);
@@ -997,12 +1082,10 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
-        // Poll Mega toggle BEFORE Orig so vanilla BUIWazaList never swallows the button press.
-        // Do NOT bind ZL/ZR because vanilla BDSP maps ZL/ZR to Confirm (A).
         if (__this != nullptr &&
             __this->fields._IsShow_k__BackingField &&
             __this->fields._IsFocus_k__BackingField &&
-            mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0) {
+            mega::targetMegaEntry(__this->fields._btlPokeParam) != nullptr) {
             constexpr int32_t kToggleMask =
                 GameController::ButtonMask::R |
                 GameController::ButtonMask::L |
@@ -1038,7 +1121,7 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
         auto* destActionParam = __this->fields._destActionParam;
         if (destActionParam != nullptr &&
             mega::gMegaArmed &&
-            mega::targetCharizardMegaForm(__this->fields._btlPokeParam) > 0) {
+            mega::targetMegaEntry(__this->fields._btlPokeParam) != nullptr) {
             destActionParam->fields.value.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
         }
         if (__this->fields._IsValid_k__BackingField) {
@@ -1047,9 +1130,6 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
     }
 };
 
-// Use BDSP's native CMD_ChangeForm_Start / CMD_ACT_PokeChangeEffect_WaitCore
-// so the built-in form-change light-burst transformation animation plays cleanly.
-
 HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
     static void Callback(Dpr::Battle::Logic::Section_ProcessActionCore::Object* __this,
                          Dpr::Battle::Logic::PokeAction::Object* pokeAction) {
@@ -1057,14 +1137,12 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
             pokeAction->fields.actionCategory == Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution) {
             auto* container = reinterpret_cast<Dpr::Battle::Logic::SectionContainer::Object*>(
                 __this->fields.m_pSectionContainer);
-            mega::executeCharizardMegaEvolution(container, pokeAction);
+            mega::executeMegaEvolution(container, pokeAction);
             mega::gMegaUsedThisBattle = true;
             FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, true);
             return;
         }
         Orig(__this, pokeAction);
-        // If our Mega Evolved Pokemon fainted during this action, immediately revert it to base form
-        // so its original Fire/Flying type and original Ability (Blaze) are restored right away.
         if (mega::gActiveMegaForm > 0 && mega::gMegaBattlePokeID != 0xFF && __this != nullptr) {
             auto* sec = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(__this);
             if (auto* megaBpp = sec->GetPokeParam(mega::gMegaBattlePokeID); megaBpp != nullptr && megaBpp->IsDead()) {
@@ -1230,7 +1308,6 @@ void installSharedPostInitHooks() {
 extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
 
-    // Install non-conflicting Battle & ItemData hooks immediately so they are always active.
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);

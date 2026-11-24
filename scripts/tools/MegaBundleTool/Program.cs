@@ -37,7 +37,9 @@ internal static class Program
             "rebuild-lumi" => RebuildLumi(args.Skip(1).ToArray()),
             "verify-and-dump" => VerifyAndDump(args.Skip(1).ToArray()),
             "dump-vanilla-pm0006" => DumpVanillaPm0006(args.Skip(1).ToArray()),
+            "dump-vanilla-species" => DumpVanillaSpecies(args.Skip(1).ToArray()),
             "build-mega-x-bundle" => BuildMegaXBundle(args.Skip(1).ToArray()),
+            "build-species-bundle" => BuildSpeciesBundle(args.Skip(1).ToArray()),
             _ => throw new ArgumentException($"Unknown command: {args[0]}")
         };
     }
@@ -557,6 +559,10 @@ internal static class Program
 
         string vanBattlePath = Path.Combine(LumiRoot, $"battle/{species}_00_00");
         string vanCommonPath = Path.Combine(LumiRoot, $"common/{species}_00");
+        if (!File.Exists(vanBattlePath))
+            vanBattlePath = Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00");
+        if (!File.Exists(vanCommonPath))
+            vanCommonPath = Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00");
 
         var am = new AssetsManager();
 
@@ -1328,6 +1334,444 @@ internal static class Program
         File.Delete(tmp);
         File.Move(tmpLz4, outBundle, true);
         Console.WriteLine($"Built Mega Charizard X Switch bundle -> {outBundle} ({new FileInfo(outBundle).Length:N0} bytes, CAB={newCab}, verts={vCount}, tris={allIdx.Count / 3})");
+        return 0;
+    }
+
+    private static int DumpVanillaSpecies(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("Usage: MegaBundleTool dump-vanilla-species <species_e.g._pm0359> <outJson>");
+            return 2;
+        }
+        string species = args[0];
+        string outJson = args[1];
+        Directory.CreateDirectory(Path.GetDirectoryName(outJson)!);
+
+        string vanBattlePath = Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00");
+        string vanCommonPath = Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00");
+
+        var am = new AssetsManager();
+        var battleBun = am.LoadBundleFile(vanBattlePath, true);
+        var battleInst = am.LoadAssetsFileFromBundle(battleBun, 0, false);
+        var commonBun = am.LoadBundleFile(vanCommonPath, true);
+        var commonInst = am.LoadAssetsFileFromBundle(commonBun, 0, false);
+
+        var tData = ReadTransforms(am, battleInst);
+        var smrInfo = FindPrimaryBodySmr(am, battleInst);
+        var smrBf = am.GetBaseField(battleInst, smrInfo);
+        var meshBf = LoadVanillaBodyMesh(am, battleInst, commonInst, smrBf);
+
+        Console.WriteLine($"=== Vanilla {species}_00_00 SMRs & Materials ===");
+        foreach (var si in battleInst.file.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
+        {
+            var sb = am.GetBaseField(battleInst, si);
+            var go = am.GetBaseField(battleInst, battleInst.file.GetAssetInfo(sb["m_GameObject.m_PathID"].AsLong)!);
+            Console.WriteLine($"  SMR: {go["m_Name"].AsString} bones={sb["m_Bones.Array"].Children.Count} mats={sb["m_Materials.Array"].Children.Count}");
+            foreach (var mRef in sb["m_Materials.Array"].Children)
+            {
+                int fid = mRef["m_FileID"].AsInt;
+                long pid = mRef["m_PathID"].AsLong;
+                var mInst = fid == 0 ? battleInst : commonInst;
+                var mi = mInst.file.GetAssetInfo(pid);
+                if (mi != null)
+                {
+                    var mb = am.GetBaseField(mInst, mi);
+                    Console.WriteLine($"    Mat file={fid} pid={pid} name={mb["m_Name"].AsString}");
+                    foreach (var te in mb["m_SavedProperties.m_TexEnvs.Array"].Children)
+                    {
+                        var pn = te["first"].AsString;
+                        if (pn == "_Col0Tex" || pn == "_EmissionMaskTex" || pn == "_BaseMap" || pn == "_MainTex")
+                        {
+                            var sc = te["second.m_Scale"]; var of = te["second.m_Offset"];
+                            var tid = te["second.m_Texture.m_PathID"].AsLong;
+                            var tfid = te["second.m_Texture.m_FileID"].AsInt;
+                            int wu = -1, wv = -1, tw = 0, th = 0, tfmt = -1;
+                            string tname = "";
+                            if (tid != 0)
+                            {
+                                var ti = commonInst.file.GetAssetInfo(tid) ?? battleInst.file.GetAssetInfo(tid);
+                                var tInst = commonInst.file.GetAssetInfo(tid) != null ? commonInst : battleInst;
+                                if (ti != null)
+                                {
+                                    var tb = am.GetBaseField(tInst, ti);
+                                    tname = tb["m_Name"].AsString;
+                                    tw = tb["m_Width"].AsInt; th = tb["m_Height"].AsInt;
+                                    tfmt = tb["m_TextureFormat"].AsInt;
+                                    wu = tb["m_TextureSettings.m_WrapU"].AsInt;
+                                    wv = tb["m_TextureSettings.m_WrapV"].AsInt;
+                                }
+                            }
+                            Console.WriteLine($"      Tex {pn} tfid={tfid} tname={tname} ({tw}x{th} fmt={tfmt}) scale=({sc["x"].AsFloat},{sc["y"].AsFloat}) off=({of["x"].AsFloat},{of["y"].AsFloat}) wrap=({wu},{wv})");
+                        }
+                    }
+                }
+            }
+        }
+
+        var bonePids = smrBf["m_Bones.Array"].Children.Select(c => c["m_PathID"].AsLong).ToList();
+        var bindPoses = meshBf["m_BindPose.Array"].Children.Select(ReadUnityMat).ToList();
+        var bonesOut = new List<object>();
+        Console.WriteLine($"=== Bones ({bonePids.Count}) ===");
+        for (int i = 0; i < bonePids.Count; i++)
+        {
+            Matrix4x4.Invert(bindPoses[i], out var invB);
+            string bn = tData[bonePids[i]].Name;
+            Console.WriteLine($"  [{i:D2}] {bn}: ({invB.M41:F3}, {invB.M42:F3}, {invB.M43:F3})");
+            bonesOut.Add(new { idx = i, name = bn, pos = new[] { invB.M41, invB.M42, invB.M43 } });
+        }
+
+        var layout = ParseVertexLayout(meshBf);
+        var raw = meshBf["m_VertexData.m_DataSize"].AsByteArray;
+        int vCount = layout.VertexCount;
+
+        var verts = new List<float[]>(vCount);
+        var normals = new List<float[]>(vCount);
+        var uvs = new List<float[]>(vCount);
+        var weights = new List<float[]>(vCount);
+        var indices = new List<int[]>(vCount);
+
+        var cPos = layout.Channels[0];
+        var cNrm = layout.Channels[1];
+        var cUv0 = layout.Channels[4];
+        var cW = layout.Channels[12];
+        var cI = layout.Channels[13];
+
+        for (int v = 0; v < vCount; v++)
+        {
+            int po = layout.Offsets[cPos.Stream] + v * layout.Strides[cPos.Stream] + cPos.Offset;
+            int esP = GetElemSize(cPos.Fmt);
+            verts.Add(new[] { ReadChannelFloat(raw, po, cPos.Fmt), ReadChannelFloat(raw, po + esP, cPos.Fmt), ReadChannelFloat(raw, po + 2 * esP, cPos.Fmt) });
+            if (cNrm.Dim >= 3)
+            {
+                int no = layout.Offsets[cNrm.Stream] + v * layout.Strides[cNrm.Stream] + cNrm.Offset;
+                int esN = GetElemSize(cNrm.Fmt);
+                normals.Add(new[] { ReadChannelFloat(raw, no, cNrm.Fmt), ReadChannelFloat(raw, no + esN, cNrm.Fmt), ReadChannelFloat(raw, no + 2 * esN, cNrm.Fmt) });
+            }
+            else normals.Add(new[] { 0f, 1f, 0f });
+            if (cUv0.Dim >= 2)
+            {
+                int uo = layout.Offsets[cUv0.Stream] + v * layout.Strides[cUv0.Stream] + cUv0.Offset;
+                int esU = GetElemSize(cUv0.Fmt);
+                uvs.Add(new[] { ReadChannelFloat(raw, uo, cUv0.Fmt), ReadChannelFloat(raw, uo + esU, cUv0.Fmt) });
+            }
+            else uvs.Add(new[] { 0f, 0f });
+            int wo = layout.Offsets[cW.Stream] + v * layout.Strides[cW.Stream] + cW.Offset;
+            int esW = GetElemSize(cW.Fmt);
+            weights.Add(new[] {
+                ReadChannelFloat(raw, wo, cW.Fmt),
+                cW.Dim > 1 ? ReadChannelFloat(raw, wo + esW, cW.Fmt) : 0f,
+                cW.Dim > 2 ? ReadChannelFloat(raw, wo + 2 * esW, cW.Fmt) : 0f,
+                cW.Dim > 3 ? ReadChannelFloat(raw, wo + 3 * esW, cW.Fmt) : 0f
+            });
+            int io = layout.Offsets[cI.Stream] + v * layout.Strides[cI.Stream] + cI.Offset;
+            int esI = GetElemSize(cI.Fmt);
+            indices.Add(new[] {
+                ReadChannelInt(raw, io, cI.Fmt),
+                cI.Dim > 1 ? ReadChannelInt(raw, io + esI, cI.Fmt) : 0,
+                cI.Dim > 2 ? ReadChannelInt(raw, io + 2 * esI, cI.Fmt) : 0,
+                cI.Dim > 3 ? ReadChannelInt(raw, io + 3 * esI, cI.Fmt) : 0
+            });
+        }
+
+        var idxBuf = meshBf["m_IndexBuffer.Array"].AsByteArray;
+        int idxFmt = meshBf["m_IndexFormat"].AsInt;
+        var submeshes = new List<List<int>>();
+        int subIdx = 0;
+        foreach (var sub in meshBf["m_SubMeshes.Array"].Children)
+        {
+            uint count = sub["indexCount"].AsUInt;
+            uint firstByte = sub["firstByte"].AsUInt;
+            int baseVert = sub["baseVertex"].AsInt;
+            var list = new List<int>((int)count);
+            for (uint t = 0; t < count; t++)
+            {
+                int vi = idxFmt == 0
+                    ? BitConverter.ToUInt16(idxBuf, (int)(firstByte + t * 2)) + baseVert
+                    : (int)BitConverter.ToUInt32(idxBuf, (int)(firstByte + t * 4)) + baseVert;
+                list.Add(vi);
+            }
+            Console.WriteLine($"  submesh[{subIdx++}]: tris={count / 3}");
+            submeshes.Add(list);
+        }
+
+        var payload = new { bones = bonesOut, verts, normals, uvs, weights, indices, submeshes };
+        File.WriteAllText(outJson, JsonSerializer.Serialize(payload));
+        Console.WriteLine($"Dumped vanilla {species} -> {outJson} (verts={vCount}, submeshes={submeshes.Count})");
+        am.UnloadAll(true);
+        return 0;
+    }
+
+    private static int BuildSpeciesBundle(string[] args)
+    {
+        if (args.Length < 6)
+        {
+            Console.Error.WriteLine("Usage: MegaBundleTool build-species-bundle <species> <formId> <cabName> <meshJson> <texDir> <outBundle>");
+            return 2;
+        }
+        string species = args[0];
+        string formId = args[1];
+        string newCab = args[2];
+        string meshJsonPath = args[3];
+        string texDir = args[4];
+        string outBundle = args[5];
+
+        string vanBattlePath = Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00");
+        string vanCommonPath = Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00");
+
+        var doc = JsonDocument.Parse(File.ReadAllText(meshJsonPath)).RootElement;
+        var jVerts = doc.GetProperty("verts");
+        var jNorms = doc.GetProperty("normals");
+        var jUvs = doc.GetProperty("uvs");
+        var jW = doc.GetProperty("weights");
+        var jI = doc.GetProperty("indices");
+        var jSubs = doc.GetProperty("submeshes");
+        int vCount = jVerts.GetArrayLength();
+
+        const int stride0 = 48;
+        const int stride1 = 32;
+        int stream1Off = Align16(vCount * stride0);
+        var vData = new byte[stream1Off + vCount * stride1];
+
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+
+        for (int v = 0; v < vCount; v++)
+        {
+            float vx = jVerts[v][0].GetSingle(), vy = jVerts[v][1].GetSingle(), vz = jVerts[v][2].GetSingle();
+            float nx = jNorms[v][0].GetSingle(), ny = jNorms[v][1].GetSingle(), nz = jNorms[v][2].GetSingle();
+            float u = jUvs[v][0].GetSingle(), uvY = jUvs[v][1].GetSingle();
+            if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
+            if (vy < minY) minY = vy; if (vy > maxY) maxY = vy;
+            if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
+
+            int o0 = v * stride0;
+            Array.Copy(BitConverter.GetBytes(vx), 0, vData, o0 + 0, 4);
+            Array.Copy(BitConverter.GetBytes(vy), 0, vData, o0 + 4, 4);
+            Array.Copy(BitConverter.GetBytes(vz), 0, vData, o0 + 8, 4);
+            Array.Copy(BitConverter.GetBytes(nx), 0, vData, o0 + 12, 4);
+            Array.Copy(BitConverter.GetBytes(ny), 0, vData, o0 + 16, 4);
+            Array.Copy(BitConverter.GetBytes(nz), 0, vData, o0 + 20, 4);
+            Array.Copy(BitConverter.GetBytes(1f), 0, vData, o0 + 24, 4);
+            Array.Copy(BitConverter.GetBytes(0f), 0, vData, o0 + 28, 4);
+            Array.Copy(BitConverter.GetBytes(0f), 0, vData, o0 + 32, 4);
+            Array.Copy(BitConverter.GetBytes(1f), 0, vData, o0 + 36, 4);
+            Array.Copy(BitConverter.GetBytes(u), 0, vData, o0 + 40, 4);
+            Array.Copy(BitConverter.GetBytes(uvY), 0, vData, o0 + 44, 4);
+
+            int o1 = stream1Off + v * stride1;
+            for (int k = 0; k < 4; k++)
+            {
+                Array.Copy(BitConverter.GetBytes(jW[v][k].GetSingle()), 0, vData, o1 + k * 4, 4);
+                Array.Copy(BitConverter.GetBytes(jI[v][k].GetInt32()), 0, vData, o1 + 16 + k * 4, 4);
+            }
+        }
+
+        var allIdx = new List<ushort>();
+        var subMeta = new List<(uint firstByte, uint indexCount)>();
+        foreach (var sub in jSubs.EnumerateArray())
+        {
+            uint firstByte = (uint)(allIdx.Count * 2);
+            uint count = (uint)sub.GetArrayLength();
+            foreach (var elem in sub.EnumerateArray())
+                allIdx.Add((ushort)elem.GetInt32());
+            subMeta.Add((firstByte, count));
+        }
+        var idxBytes = new byte[allIdx.Count * 2];
+        for (int i = 0; i < allIdx.Count; i++)
+            Array.Copy(BitConverter.GetBytes(allIdx[i]), 0, idxBytes, i * 2, 2);
+
+        var am = new AssetsManager();
+        var battleBun = am.LoadBundleFile(vanBattlePath, true);
+        var battleInst = am.LoadAssetsFileFromBundle(battleBun, 0, false);
+        var commonBun = am.LoadBundleFile(vanCommonPath, true);
+        var commonInst = am.LoadAssetsFileFromBundle(commonBun, 0, false);
+        var f = battleInst.file;
+
+        string baseFormId = $"{species}_00_00";
+        battleBun.file.BlockAndDirInfo.DirectoryInfos[0].Name = newCab;
+        foreach (var goInfo in f.GetAssetsOfType(AssetClassID.GameObject))
+        {
+            var goBf = am.GetBaseField(battleInst, goInfo);
+            if (goBf["m_Name"].AsString == baseFormId)
+            {
+                goBf["m_Name"].AsString = formId;
+                goInfo.SetNewData(goBf);
+            }
+        }
+        foreach (var abInfo in f.GetAssetsOfType(AssetClassID.AssetBundle))
+        {
+            var abBf = am.GetBaseField(battleInst, abInfo);
+            abBf["m_Name"].AsString = $"pokemons/battle/{formId}";
+            abBf["m_AssetBundleName"].AsString = $"pokemons/battle/{formId}";
+            foreach (var cont in abBf["m_Container.Array"].Children)
+            {
+                string k = cont["first"].AsString;
+                if (k.Contains(baseFormId))
+                    cont["first"].AsString = k.Replace(baseFormId, formId);
+            }
+            abInfo.SetNewData(abBf);
+        }
+
+        long nextPid = f.AssetInfos.Max(a => a.PathId) + 100;
+        int EnsureTypeTreeIndex(int typeId)
+        {
+            int idx = f.Metadata.TypeTreeTypes.FindIndex(t => t.TypeId == typeId);
+            if (idx >= 0) return idx;
+            var srcType = commonInst.file.Metadata.FindTypeTreeTypeByID(typeId)
+                ?? throw new InvalidOperationException($"Missing TypeTreeType {typeId} in common bundle");
+            f.Metadata.TypeTreeTypes.Add(srcType);
+            return f.Metadata.TypeTreeTypes.Count - 1;
+        }
+        int texTypeIdx = EnsureTypeTreeIndex((int)AssetClassID.Texture2D);
+        int meshTypeIdx = EnsureTypeTreeIndex((int)AssetClassID.Mesh);
+
+        var vanTexTemplateInfo = commonInst.file.GetAssetsOfType(AssetClassID.Texture2D).First();
+        var texPids = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var texMeta = JsonDocument.Parse(File.ReadAllText(Path.Combine(texDir, "textures.json"))).RootElement;
+        foreach (var prop in texMeta.EnumerateObject())
+        {
+            string stem = prop.Name;
+            int w = prop.Value[0].GetInt32(), h = prop.Value[1].GetInt32();
+            byte[] rgba = File.ReadAllBytes(Path.Combine(texDir, $"{stem}.raw"));
+            var texBf = am.GetBaseField(commonInst, vanTexTemplateInfo);
+            texBf["m_Name"].AsString = $"{formId}_{stem}";
+            texBf["m_ForcedFallbackFormat"].AsInt = 4;
+            texBf["m_Width"].AsInt = w;
+            texBf["m_Height"].AsInt = h;
+            texBf["m_CompleteImageSize"].AsUInt = (uint)rgba.Length;
+            texBf["m_TextureFormat"].AsInt = 4;
+            texBf["m_MipCount"].AsInt = 1;
+            texBf["m_IsReadable"].AsBool = false;
+            texBf["m_ImageCount"].AsInt = 1;
+            texBf["m_TextureDimension"].AsInt = 2;
+            texBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
+            texBf["m_TextureSettings.m_WrapU"].AsInt = 2; // Mirror
+            texBf["m_TextureSettings.m_WrapV"].AsInt = 0; // Repeat
+            texBf["m_TextureSettings.m_WrapW"].AsInt = 0;
+            texBf["m_StreamData.offset"].AsULong = 0;
+            texBf["m_StreamData.size"].AsUInt = 0;
+            texBf["m_StreamData.path"].AsString = "";
+            texBf["image data"].AsByteArray = rgba;
+            long pid = nextPid++;
+            var newInfo = new AssetFileInfo { PathId = pid, TypeId = (int)AssetClassID.Texture2D, TypeIdOrIndex = texTypeIdx };
+            newInfo.SetNewData(texBf);
+            f.Metadata.AddAssetInfo(newInfo);
+            texPids[stem] = pid;
+        }
+
+        var smrInfo = FindPrimaryBodySmr(am, battleInst);
+        var smrBf = am.GetBaseField(battleInst, smrInfo);
+        var vanMeshBf = LoadVanillaBodyMesh(am, battleInst, commonInst, smrBf);
+
+        vanMeshBf["m_Name"].AsString = $"{formId}_BodySkin";
+        vanMeshBf["m_IndexFormat"].AsInt = 0;
+        vanMeshBf["m_IndexBuffer.Array"].AsByteArray = idxBytes;
+        vanMeshBf["m_VertexData.m_VertexCount"].AsUInt = (uint)vCount;
+        vanMeshBf["m_VertexData.m_DataSize"].AsByteArray = vData;
+        vanMeshBf["m_StreamData.offset"].AsULong = 0;
+        vanMeshBf["m_StreamData.size"].AsUInt = 0;
+        vanMeshBf["m_StreamData.path"].AsString = "";
+
+        var chArr = vanMeshBf["m_VertexData.m_Channels.Array"].Children;
+        for (int ci = 0; ci < chArr.Count; ci++)
+        {
+            chArr[ci]["stream"].AsByte = 0; chArr[ci]["offset"].AsByte = 0;
+            chArr[ci]["format"].AsByte = 0; chArr[ci]["dimension"].AsByte = 0;
+        }
+        chArr[0]["stream"].AsByte = 0; chArr[0]["offset"].AsByte = 0;  chArr[0]["format"].AsByte = 0;  chArr[0]["dimension"].AsByte = 3;
+        chArr[1]["stream"].AsByte = 0; chArr[1]["offset"].AsByte = 12; chArr[1]["format"].AsByte = 0;  chArr[1]["dimension"].AsByte = 3;
+        chArr[2]["stream"].AsByte = 0; chArr[2]["offset"].AsByte = 24; chArr[2]["format"].AsByte = 0;  chArr[2]["dimension"].AsByte = 4;
+        chArr[4]["stream"].AsByte = 0; chArr[4]["offset"].AsByte = 40; chArr[4]["format"].AsByte = 0;  chArr[4]["dimension"].AsByte = 2;
+        chArr[12]["stream"].AsByte = 1; chArr[12]["offset"].AsByte = 0;  chArr[12]["format"].AsByte = 0;  chArr[12]["dimension"].AsByte = 4;
+        chArr[13]["stream"].AsByte = 1; chArr[13]["offset"].AsByte = 16; chArr[13]["format"].AsByte = 11; chArr[13]["dimension"].AsByte = 4;
+
+        var subsArr = vanMeshBf["m_SubMeshes.Array"];
+        for (int si = 0; si < Math.Min(subsArr.Children.Count, subMeta.Count); si++)
+        {
+            subsArr.Children[si]["firstByte"].AsUInt = subMeta[si].firstByte;
+            subsArr.Children[si]["indexCount"].AsUInt = subMeta[si].indexCount;
+            subsArr.Children[si]["baseVertex"].AsInt = 0;
+            subsArr.Children[si]["firstVertex"].AsUInt = 0;
+            subsArr.Children[si]["vertexCount"].AsUInt = (uint)vCount;
+        }
+        vanMeshBf["m_LocalAABB.m_Center.x"].AsFloat = 0.5f * (minX + maxX);
+        vanMeshBf["m_LocalAABB.m_Center.y"].AsFloat = 0.5f * (minY + maxY);
+        vanMeshBf["m_LocalAABB.m_Center.z"].AsFloat = 0.5f * (minZ + maxZ);
+        vanMeshBf["m_LocalAABB.m_Extent.x"].AsFloat = 0.5f * (maxX - minX);
+        vanMeshBf["m_LocalAABB.m_Extent.y"].AsFloat = 0.5f * (maxY - minY);
+        vanMeshBf["m_LocalAABB.m_Extent.z"].AsFloat = 0.5f * (maxZ - minZ);
+
+        long meshPid = nextPid++;
+        var newMeshInfo = new AssetFileInfo { PathId = meshPid, TypeId = (int)AssetClassID.Mesh, TypeIdOrIndex = meshTypeIdx };
+        newMeshInfo.SetNewData(vanMeshBf);
+        f.Metadata.AddAssetInfo(newMeshInfo);
+
+        smrBf["m_Mesh.m_FileID"].AsInt = 0;
+        smrBf["m_Mesh.m_PathID"].AsLong = meshPid;
+        smrBf["m_AABB.m_Center.x"].AsFloat = 0.5f * (minX + maxX);
+        smrBf["m_AABB.m_Center.y"].AsFloat = 0.5f * (minY + maxY);
+        smrBf["m_AABB.m_Center.z"].AsFloat = 0.5f * (minZ + maxZ);
+        smrBf["m_AABB.m_Extent.x"].AsFloat = 0.5f * (maxX - minX);
+        smrBf["m_AABB.m_Extent.y"].AsFloat = 0.5f * (maxY - minY);
+        smrBf["m_AABB.m_Extent.z"].AsFloat = 0.5f * (maxZ - minZ);
+
+        var patchedMatPids = new HashSet<long>();
+        foreach (var mRef in smrBf["m_Materials.Array"].Children)
+        {
+            long matPid = mRef["m_PathID"].AsLong;
+            if (!patchedMatPids.Add(matPid)) continue;
+            var matInfo = f.GetAssetInfo(matPid);
+            if (matInfo == null) continue;
+            var mb = am.GetBaseField(battleInst, matInfo);
+            string mName = mb["m_Name"].AsString;
+            mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
+            foreach (var texEntry in mb["m_SavedProperties.m_TexEnvs.Array"].Children)
+            {
+                string prop = texEntry["first"].AsString;
+                var tex = texEntry["second.m_Texture"];
+                bool isCol = prop == "_Col0Tex" || prop == "_BaseMap" || prop == "_MainTex";
+                bool isEmi = prop == "_EmissionMaskTex" || prop == "_EmissionMap";
+                if (isCol)
+                {
+                    if (mName.Contains("Body00") && texPids.TryGetValue("Body00_col", out long p00)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p00; Console.WriteLine($"  Patched {mName}.{prop} -> Body00_col"); }
+                    else if (mName.Contains("Body01") && texPids.TryGetValue("Body01_col", out long p01)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p01; Console.WriteLine($"  Patched {mName}.{prop} -> Body01_col"); }
+                    else if (mName.Contains("Body02") && texPids.TryGetValue("Body02_col", out long p02)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p02; Console.WriteLine($"  Patched {mName}.{prop} -> Body02_col"); }
+                    else if (mName.Contains("BodyVco") && texPids.TryGetValue("BodyVco_col", out long pvco)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pvco; Console.WriteLine($"  Patched {mName}.{prop} -> BodyVco_col"); }
+                    else if (mName.Contains("BodyA") && texPids.TryGetValue("BodyA_col", out long pa)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pa; Console.WriteLine($"  Patched {mName}.{prop} -> BodyA_col"); }
+                    else if (mName.Contains("BodyB") && texPids.TryGetValue("BodyB_col", out long pb)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pb; Console.WriteLine($"  Patched {mName}.{prop} -> BodyB_col"); }
+                    else if (mName.Contains("Body") && texPids.TryGetValue("Body_col", out long pbody)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pbody; Console.WriteLine($"  Patched {mName}.{prop} -> Body_col"); }
+                    else if (mName.Contains("Eye") && texPids.TryGetValue("Eye_col", out long pe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pe; Console.WriteLine($"  Patched {mName}.{prop} -> Eye_col"); }
+                }
+                else if (isEmi)
+                {
+                    if (mName.Contains("BodyB") && texPids.TryGetValue("BodyB_emi", out long pbe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pbe; Console.WriteLine($"  Patched {mName}.{prop} -> BodyB_emi"); }
+                    else if (mName.Contains("Body") && texPids.TryGetValue("Body_emi", out long pme)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pme; Console.WriteLine($"  Patched {mName}.{prop} -> Body_emi"); }
+                }
+            }
+            matInfo.SetNewData(mb);
+        }
+        smrInfo.SetNewData(smrBf);
+
+        string tmp = outBundle + ".tmp";
+        string tmpLz4 = outBundle + ".lz4";
+        battleBun.file.BlockAndDirInfo.DirectoryInfos[0].SetNewData(f);
+        using (var w = new AssetsFileWriter(tmp))
+            battleBun.file.Write(w);
+        am.UnloadAll(true);
+
+        var packBun = new AssetBundleFile();
+        using (var r = new AssetsFileReader(tmp))
+        {
+            packBun.Read(r);
+            using var cw = new AssetsFileWriter(tmpLz4);
+            packBun.Pack(cw, AssetBundleCompressionType.LZ4);
+        }
+        File.Delete(tmp);
+        Directory.CreateDirectory(Path.GetDirectoryName(outBundle)!);
+        File.Move(tmpLz4, outBundle, true);
+        Console.WriteLine($"Built {formId} Switch bundle -> {outBundle} ({new FileInfo(outBundle).Length:N0} bytes, CAB={newCab}, verts={vCount}, tris={allIdx.Count / 3})");
         return 0;
     }
 }
