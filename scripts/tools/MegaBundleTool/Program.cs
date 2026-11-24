@@ -866,6 +866,20 @@ internal static class Program
                 {
                     var mb = am.GetBaseField(mInst, mi);
                     Console.WriteLine($"    Mat file={fid} pid={pid} name={mb["m_Name"].AsString}");
+                    foreach (var te in mb["m_SavedProperties.m_TexEnvs.Array"].Children) {
+                        var pn = te["first"].AsString;
+                        if (pn == "_Col0Tex" || pn == "_EmissionMaskTex") {
+                            var sc = te["second.m_Scale"]; var of = te["second.m_Offset"];
+                            var tid = te["second.m_Texture.m_PathID"].AsLong;
+                            var tfid = te["second.m_Texture.m_FileID"].AsInt;
+                            int wu = -1, wv = -1;
+                            if (tfid == 2 && tid != 0) {
+                                var ti = commonInst.file.GetAssetInfo(tid);
+                                if (ti != null) { var tb = am.GetBaseField(commonInst, ti); wu = tb["m_TextureSettings.m_WrapU"].AsInt; wv = tb["m_TextureSettings.m_WrapV"].AsInt; }
+                            }
+                            Console.WriteLine($"      TexScale {pn} scale=({sc["x"].AsFloat},{sc["y"].AsFloat}) off=({of["x"].AsFloat},{of["y"].AsFloat}) wrap=({wu},{wv})");
+                        }
+                    }
                 }
             }
         }
@@ -1138,7 +1152,7 @@ internal static class Program
             texBf["m_ImageCount"].AsInt = 1;
             texBf["m_TextureDimension"].AsInt = 2;
             texBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
-            texBf["m_TextureSettings.m_WrapU"].AsInt = 0; // Repeat
+            texBf["m_TextureSettings.m_WrapU"].AsInt = 2; // Mirror (matches vanilla BDSP scale=(2,1) wrap=(2,0))
             texBf["m_TextureSettings.m_WrapV"].AsInt = 0; // Repeat
             texBf["m_TextureSettings.m_WrapW"].AsInt = 0;
             texBf["m_StreamData.offset"].AsULong = 0;
