@@ -19,9 +19,11 @@
 #include "externals/Dpr/Battle/Logic/PokeActionContainer.h"
 #include "externals/Dpr/Battle/Logic/SVCL_ACTION.h"
 #include "externals/Dpr/Battle/Logic/BattleEnv.h"
+#include "externals/Dpr/Battle/Logic/EventFactor.h"
 #include "externals/Dpr/Battle/Logic/EventID.h"
 #include "externals/Dpr/Battle/Logic/EventVar.h"
 #include "externals/Dpr/Battle/Logic/EventSystem.h"
+#include "externals/Dpr/Battle/Logic/Handler/Tokusei.h"
 #include "externals/Dpr/Battle/Logic/Section.h"
 #include "externals/Dpr/Battle/Logic/ServerCommandPutter.h"
 #include "externals/Dpr/Battle/Logic/SectionContainer.h"
@@ -172,177 +174,141 @@ struct Il2CppFieldInfo {
     uint32_t token;
 };
 
-inline Il2CppClass* findNestedClassByName(Il2CppClass* parent, const char* targetName) {
-    if (parent == nullptr || parent->_1.nestedTypes == nullptr || targetName == nullptr) {
+// Resolves an ability's singleton EventHandlerTable::Array* and priority directly from BDSP's
+// Handler::Tokusei::GET_FUNC_TABLE (zero extra allocations, zero memory leaks).
+inline Dpr::Battle::Logic::EventFactor::EventHandlerTable::Array* resolveAbilityHandlerTable(
+    uint16_t tokuseiNo, uint8_t* outPrio) {
+    using namespace Dpr::Battle::Logic;
+    system_load_typeinfo(0x8a5b);
+    Handler::Tokusei::getClass()->initIfNeeded();
+    auto* sf = Handler::Tokusei::getClass()->static_fields;
+    if (sf == nullptr || sf->GET_FUNC_TABLE == nullptr) {
         return nullptr;
     }
-    for (uint16_t i = 0; i < parent->_2.nested_type_count; ++i) {
-        Il2CppClass* nested = parent->_1.nestedTypes[i];
-        if (nested != nullptr && nested->_1.name != nullptr && std::strcmp(nested->_1.name, targetName) == 0) {
-            return nested;
+    auto* tbl = sf->GET_FUNC_TABLE;
+    for (uint64_t i = 0; i < tbl->max_length; ++i) {
+        const auto& elem = tbl->m_Items[i].fields;
+        if (elem.tokusei == static_cast<int32_t>(tokuseiNo) && elem.func != nullptr) {
+            const auto& del = elem.func->fields;
+            if (del.method_ptr != 0) {
+                auto fn = reinterpret_cast<EventFactor::EventHandlerTable::Array* (*)(uint8_t*, const MethodInfo*)>(
+                    del.method_ptr);
+                return fn(outPrio, del.method);
+            }
         }
     }
     return nullptr;
 }
 
-inline const MethodInfo* findMethodByName(Il2CppClass* klass, const char* targetName, int expectedParams) {
-    if (klass == nullptr || klass->_1.methods == nullptr || targetName == nullptr) {
-        return nullptr;
+// Silently hot-swaps a Pokemon's live Ability EventFactor in-place inside BattleEnv::m_eventFactorContainer.
+// Avoids Section_FromEvent_ChangeTokusei entirely (which emits duplicate Skill-Swap banners and fails on
+// mismatched Description field widths), causes zero allocations/leaks, and lets native EventID::MEMBER_IN
+// trigger the Mega Ability (e.g. Drought -> 1 official banner + Sunny Day brightening + 5-turn Harsh Sunlight).
+inline bool swapAbilityEventFactorInPlace(Dpr::Battle::Logic::BattleEnv::Object* battleEnv,
+                                          uint8_t pokeID,
+                                          uint16_t prevTokusei,
+                                          uint16_t nextTokusei) {
+    using namespace Dpr::Battle::Logic;
+    if (battleEnv == nullptr || battleEnv->fields.m_eventFactorContainer == nullptr) {
+        return false;
     }
-    auto** methods = reinterpret_cast<const MethodInfo**>(klass->_1.methods);
-    for (uint16_t i = 0; i < klass->_2.method_count; ++i) {
-        const MethodInfo* m = methods[i];
-        if (m != nullptr && m->name != nullptr && m->methodPointer != nullptr &&
-            std::strcmp(m->name, targetName) == 0 &&
-            (expectedParams < 0 || m->parameters_count == expectedParams)) {
-            return m;
+
+    uint8_t newPrio = 0;
+    auto* newTable = resolveAbilityHandlerTable(nextTokusei, &newPrio);
+    if (newTable == nullptr) {
+        return false;
+    }
+
+    auto trySwapFactor = [&](EventFactor::Object* factor) -> bool {
+        if (factor == nullptr) {
+            return false;
         }
-    }
-    return nullptr;
-}
-
-inline const Il2CppFieldInfo* findFieldByName(Il2CppClass* klass, const char* targetName) {
-    if (klass == nullptr || klass->_1.fields == nullptr || targetName == nullptr) {
-        return nullptr;
-    }
-    auto* fields = reinterpret_cast<const Il2CppFieldInfo*>(klass->_1.fields);
-    for (uint16_t i = 0; i < klass->_2.field_count; ++i) {
-        if (fields[i].name != nullptr && std::strcmp(fields[i].name, targetName) == 0) {
-            return &fields[i];
+        auto* fObj = reinterpret_cast<Il2CppObject*>(factor);
+        if (fObj->klass == nullptr || fObj->klass->_1.name == nullptr ||
+            std::strcmp(fObj->klass->_1.name, "EventFactor") != 0) {
+            return false;
         }
-    }
-    return nullptr;
-}
-
-template <typename T>
-inline bool writeFieldIfPresent(void* obj, Il2CppClass* klass, const char* fieldName, T value) {
-    if (obj == nullptr || klass == nullptr) {
-        return false;
-    }
-    const Il2CppFieldInfo* fi = findFieldByName(klass, fieldName);
-    if (fi == nullptr || fi->offset < 0) {
-        return false;
-    }
-    uint32_t fieldOff = static_cast<uint32_t>(fi->offset);
-    uint32_t nextOff = klass->_2.instance_size;
-    auto* allFields = reinterpret_cast<const Il2CppFieldInfo*>(klass->_1.fields);
-    for (uint16_t i = 0; i < klass->_2.field_count; ++i) {
-        if (allFields[i].offset > fi->offset && static_cast<uint32_t>(allFields[i].offset) < nextOff) {
-            nextOff = static_cast<uint32_t>(allFields[i].offset);
+        auto* data = factor->fields.m_data;
+        if (data == nullptr || !data->fields.existFlag || data->fields.pokeID != pokeID) {
+            return false;
         }
-    }
-    if (fieldOff + sizeof(T) > nextOff) {
-        return false;
-    }
-    std::memcpy(reinterpret_cast<uint8_t*>(obj) + fieldOff, &value, sizeof(T));
-    return true;
-}
+        if (data->fields.subID != prevTokusei &&
+            !(data->fields.subID == nextTokusei && data->fields.handlerTable != newTable)) {
+            return false;
+        }
 
-// Dynamically invokes BDSP's native Section_FromEvent_ChangeTokusei::Execute using live IL2CPP metadata
-// so the pre-Mega EventFactor (e.g. Blaze) is cleanly unregistered, the Mega Ability EventFactor
-// (e.g. Drought / Tough Claws / Intimidate / etc.) is registered, BattleView updates its ability cache,
-// and Section_AfterTokuseiChanged_Event fires switch-in ability effects natively.
-inline bool invokeNativeChangeTokusei(void* sectionChangeTokusei, uint8_t pokeID, uint16_t nextTokusei) {
-    if (sectionChangeTokusei == nullptr) {
-        return false;
-    }
-    auto* secObj = reinterpret_cast<Il2CppObject*>(sectionChangeTokusei);
-    Il2CppClass* secClass = secObj->klass;
-    if (secClass == nullptr) {
-        return false;
-    }
+        data->fields.handlerTable = newTable;
+        data->fields.numHandlers = static_cast<uint32_t>(newTable->max_length);
+        data->fields.subID = nextTokusei;
+        if (newPrio != 0) {
+            data->fields.priority = newPrio;
+        }
+        data->fields.sleepFlag = false;
+        data->fields.rmReserveFlag = false;
+        if (data->fields.work != nullptr) {
+            for (uint64_t w = 0; w < data->fields.work->max_length && w < 16; ++w) {
+                data->fields.work->m_Items[w] = 0;
+            }
+        }
+        return true;
+    };
 
-    Il2CppClass* descClass = findNestedClassByName(secClass, "Description");
-    Il2CppClass* resClass = findNestedClassByName(secClass, "Result");
-    const MethodInfo* execMethod = findMethodByName(secClass, "Execute", 2);
-    if (descClass == nullptr || resClass == nullptr || execMethod == nullptr) {
-        return false;
-    }
+    auto scanContainerObject = [&](Il2CppObject* obj, int depth, auto&& selfRef) -> bool {
+        if (obj == nullptr || obj->klass == nullptr || obj->klass->_1.fields == nullptr || depth > 2) {
+            return false;
+        }
+        Il2CppClass* cClass = obj->klass;
+        auto* fields = reinterpret_cast<const Il2CppFieldInfo*>(cClass->_1.fields);
+        for (uint16_t i = 0; i < cClass->_2.field_count; ++i) {
+            const auto& fi = fields[i];
+            if (fi.type == nullptr || fi.offset < static_cast<int32_t>(sizeof(Il2CppObject)) || (fi.offset % 8) != 0) {
+                continue;
+            }
+            const uint8_t ilType = static_cast<uint8_t>((fi.type->bits >> 16) & 0xFF);
+            if (ilType != 0x12 /* IL2CPP_TYPE_CLASS */ && ilType != 0x1D /* IL2CPP_TYPE_SZARRAY */) {
+                continue;
+            }
+            void* ptr = nullptr;
+            std::memcpy(&ptr, reinterpret_cast<const uint8_t*>(obj) + fi.offset, sizeof(void*));
+            if (ptr == nullptr) {
+                continue;
+            }
 
-    if ((descClass->_2.bitflags2 >> 1 & 1) && (descClass->_2.cctor_finished == 0)) {
-        il2cpp_runtime_class_init(descClass);
-    }
-    if ((resClass->_2.bitflags2 >> 1 & 1) && (resClass->_2.cctor_finished == 0)) {
-        il2cpp_runtime_class_init(resClass);
-    }
+            auto* refObj = reinterpret_cast<Il2CppObject*>(ptr);
+            if (refObj->klass == nullptr) {
+                continue;
+            }
 
-    void* descObj = il2cpp_object_new(descClass);
-    void* resObj = il2cpp_object_new(resClass);
-    if (descObj == nullptr || resObj == nullptr) {
-        return false;
-    }
-
-    if (const MethodInfo* descCtor = findMethodByName(descClass, ".ctor", 0); descCtor != nullptr) {
-        reinterpret_cast<void(*)(void*, const MethodInfo*)>(descCtor->methodPointer)(descObj, descCtor);
-    }
-    if (const MethodInfo* resCtor = findMethodByName(resClass, ".ctor", 0); resCtor != nullptr) {
-        reinterpret_cast<void(*)(void*, const MethodInfo*)>(resCtor->methodPointer)(resObj, resCtor);
-    }
-
-    auto asciiContainsIgnoreCase = [](const char* hay, const char* needle) -> bool {
-        if (hay == nullptr || needle == nullptr) return false;
-        const size_t hayLen = std::strlen(hay);
-        const size_t needleLen = std::strlen(needle);
-        if (needleLen == 0 || hayLen < needleLen) return false;
-        for (size_t i = 0; i <= hayLen - needleLen; ++i) {
-            bool match = true;
-            for (size_t j = 0; j < needleLen; ++j) {
-                unsigned char hc = static_cast<unsigned char>(hay[i + j]);
-                unsigned char nc = static_cast<unsigned char>(needle[j]);
-                if (hc >= 'A' && hc <= 'Z') hc = static_cast<unsigned char>(hc + ('a' - 'A'));
-                if (nc >= 'A' && nc <= 'Z') nc = static_cast<unsigned char>(nc + ('a' - 'A'));
-                if (hc != nc) {
-                    match = false;
-                    break;
+            if (ilType == 0x12 && refObj->klass->_1.name != nullptr &&
+                std::strcmp(refObj->klass->_1.name, "EventFactor") == 0) {
+                auto* cur = reinterpret_cast<EventFactor::Object*>(refObj);
+                for (int step = 0; cur != nullptr && step < 128; ++step) {
+                    if (trySwapFactor(cur)) {
+                        return true;
+                    }
+                    cur = cur->fields.m_nextFactor;
+                }
+            } else if (ilType == 0x1D && refObj->klass->_1.element_class != nullptr &&
+                       refObj->klass->_1.element_class->_1.name != nullptr &&
+                       std::strcmp(refObj->klass->_1.element_class->_1.name, "EventFactor") == 0) {
+                auto* arr = reinterpret_cast<EventFactor::Array*>(refObj);
+                const uint64_t len = (arr->max_length < 256) ? arr->max_length : 256;
+                for (uint64_t idx = 0; idx < len; ++idx) {
+                    if (trySwapFactor(arr->m_Items[idx])) {
+                        return true;
+                    }
+                }
+            } else if (ilType == 0x12 && depth < 1) {
+                if (selfRef(refObj, depth + 1, selfRef)) {
+                    return true;
                 }
             }
-            if (match) return true;
         }
         return false;
     };
 
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "userPokeID", pokeID);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "targetPokeID", pokeID);
-    writeFieldIfPresent<uint8_t>(descObj, descClass, "pokeID", pokeID);
-    writeFieldIfPresent<int32_t>(descObj, descClass, "tokusei", static_cast<int32_t>(nextTokusei));
-
-    // Suppress all ability window/effect/message boolean flags on Section_FromEvent_ChangeTokusei::Description
-    // dynamically via live IL2CPP metadata so swapping the EventFactor is 100% silent (0 popups) and
-    // ONLY the subsequent native EventID::MEMBER_IN handler (e.g. Drought) displays its single official banner.
-    if (descClass->_1.fields != nullptr) {
-        auto* fields = reinterpret_cast<const Il2CppFieldInfo*>(descClass->_1.fields);
-        for (uint16_t i = 0; i < descClass->_2.field_count; ++i) {
-            const char* fname = fields[i].name;
-            if (fname == nullptr) continue;
-            const bool isBoolPrefix =
-                (fname[0] == 'i' && fname[1] == 's' && fname[2] >= 'A' && fname[2] <= 'Z') ||
-                (fname[0] == 'f' && fname[1] >= 'A' && fname[1] <= 'Z');
-            if (!isBoolPrefix) continue;
-
-            if (asciiContainsIgnoreCase(fname, "same")) {
-                writeFieldIfPresent<bool>(descObj, descClass, fname, true);
-            } else if (asciiContainsIgnoreCase(fname, "window") ||
-                       asciiContainsIgnoreCase(fname, "disp") ||
-                       asciiContainsIgnoreCase(fname, "effect") ||
-                       asciiContainsIgnoreCase(fname, "anim") ||
-                       asciiContainsIgnoreCase(fname, "view") ||
-                       asciiContainsIgnoreCase(fname, "message") ||
-                       asciiContainsIgnoreCase(fname, "msg")) {
-                const bool isNegated =
-                    asciiContainsIgnoreCase(fname, "disable") ||
-                    asciiContainsIgnoreCase(fname, "not") ||
-                    asciiContainsIgnoreCase(fname, "skip") ||
-                    asciiContainsIgnoreCase(fname, "no");
-                writeFieldIfPresent<bool>(descObj, descClass, fname, isNegated);
-            }
-        }
-    }
-
-    gInMegaTokuseiSwap = true;
-    reinterpret_cast<void(*)(void*, void*, void**, const MethodInfo*)>(execMethod->methodPointer)(
-        sectionChangeTokusei, resObj, &descObj, execMethod);
-    gInMegaTokuseiSwap = false;
-    return true;
+    auto* containerObj = reinterpret_cast<Il2CppObject*>(battleEnv->fields.m_eventFactorContainer);
+    return scanContainerObject(containerObj, 0, scanContainerObject);
 }
 
 // Builds a dual-type PokeTypePair preserving any extra type (Trick-or-Treat / Forest's Curse)
@@ -678,14 +644,8 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
     auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
     container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
 
-    // Swap the active Ability EventFactor (e.g. Blaze -> Tough Claws / Drought) via BDSP's native
-    // Section_FromEvent_ChangeTokusei so the new Ability's EventHandlerTable is registered and
-    // switch-in abilities (Drought, Intimidate, Drizzle, etc.) trigger natively with their real
-    // BDSP ability banner and weather/field effects.
+    // Update BTL_POKEPARAM, CoreParam/Accessor, and BattleView client info to the Mega Ability.
     const uint16_t megaAbility = static_cast<uint16_t>(targetForm == kMegaXForm ? kToughClaws : kDrought);
-    invokeNativeChangeTokusei(container->fields.m_section_FromEvent_ChangeTokusei, param->GetID(), megaAbility);
-
-    // Ensure BTL_POKEPARAM, CoreParam/Accessor, and BattleView client info all reflect the Mega Ability.
     param->fields.m_tokusei = megaAbility;
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
@@ -699,10 +659,14 @@ void executeCharizardMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object*
         msgSec->fields.m_pServerCmdPutter->PublishClientInformation_AppeardPokemon(&param);
     }
 
-    // Now that invokeNativeChangeTokusei has silently registered the Mega Ability's real EventFactor
-    // (e.g. HandlerTable_Hideri for Drought), fire native MEMBER_IN (108) followed by MEMBER_IN_COMP (111).
-    // In BDSP, weather setters (Drought/Drizzle/Sand Stream/Snow Warning), terrain setters, and Intimidate
-    // listen to EventID::MEMBER_IN (108), while post-entry abilities (Zen Mode) listen to MEMBER_IN_COMP (111).
+    // Silently hot-swap Charizard's live Ability EventFactor in-place (Blaze -> Drought / Tough Claws)
+    // without calling Section_FromEvent_ChangeTokusei, then fire native MEMBER_IN (108) + MEMBER_IN_COMP (111)
+    // so Drought displays exactly 1 official banner and immediately activates Harsh Sunlight + 3D brightening.
+    if (msgSec != nullptr && msgSec->fields.m_pBattleEnv != nullptr) {
+        auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(msgSec->fields.m_pBattleEnv);
+        swapAbilityEventFactorInPlace(battleEnv, param->GetID(), gPreMegaTokusei, megaAbility);
+    }
+
     if (msgSec != nullptr && msgSec->fields.m_pEventSystem != nullptr) {
         auto* eventSys = reinterpret_cast<Dpr::Battle::Logic::EventSystem::Object*>(msgSec->fields.m_pEventSystem);
         eventSys->EVENTVAR_Push();
