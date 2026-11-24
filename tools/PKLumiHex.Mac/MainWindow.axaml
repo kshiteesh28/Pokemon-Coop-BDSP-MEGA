@@ -190,8 +190,11 @@
               <StackPanel Spacing="10">
                 <TextBlock Classes="section" Text="QUICK KITS" />
                 <TextBlock FontSize="12" Foreground="#94A3B8" TextWrapping="Wrap"
-                           Text="Adds Key Stone (773) to Key Items and Charizardite X (660) + Charizardite Y (678) to Items." />
-                <Button Classes="accent" Content="Grant Mega Charizard Kit" Click="OnGrantMegaKitClick" />
+                           Text="Adds Key Stone (773), Mega Ring (696), Mega Bracelet (744), Charizardite X/Y (660/678), and Absolite / Absolite Z (677/622) — or grant all 92 Mega Stones." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="accent" Content="Grant Mega Evolution Kit" Click="OnGrantMegaKitClick" />
+                  <Button Content="Grant All 92 Mega Stones" Click="OnGrantAllMegaStonesClick" />
+                </StackPanel>
               </StackPanel>
             </Border>
           </StackPanel>
