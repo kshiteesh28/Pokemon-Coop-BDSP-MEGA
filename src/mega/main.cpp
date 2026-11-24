@@ -312,25 +312,63 @@ inline bool swapAbilityEventFactorInPlace(Dpr::Battle::Logic::BattleEnv::Object*
 }
 
 // Builds a dual-type PokeTypePair preserving any extra type (Trick-or-Treat / Forest's Curse)
-// and self-verifies the bit packing against BDSP's native PokeTypePair::Split.
+// by dynamically probing MakePure + Split so the exact BDSP bit-shift layout is 100% verified.
 inline Dpr::Battle::Logic::PokeTypePair::Object makeDualTypePair(
     Dpr::Battle::Logic::PokeTypePair::Object origPair, uint8_t type1, uint8_t type2) {
-    Dpr::Battle::Logic::PokeTypePair::Object candidate{};
+    using namespace Dpr::Battle::Logic;
+    static bool sProbed = false;
+    static uint8_t sShift1 = 0;
+    static uint8_t sShift2 = 5;
+    static uint16_t sMask = 0x1F;
+    static uint16_t sExMask = 0xFC00;
+
+    if (!sProbed) {
+        sProbed = true;
+        const uint16_t pure0 = PokeTypePair::MakePure(0).fields.value;
+        const uint16_t pure1 = PokeTypePair::MakePure(1).fields.value;
+        const uint16_t diff = static_cast<uint16_t>(pure1 ^ pure0);
+        uint8_t bits[2] = {0, 5};
+        int found = 0;
+        for (uint8_t b = 0; b < 16 && found < 2; ++b) {
+            if ((diff >> b) & 1U) {
+                bits[found++] = b;
+            }
+        }
+        if (found == 2) {
+            const uint8_t width = static_cast<uint8_t>(bits[1] - bits[0]);
+            const uint16_t mask = (width < 16) ? static_cast<uint16_t>((1U << width) - 1U) : 0x1F;
+            PokeTypePair::Object probe{};
+            probe.fields.value = static_cast<uint16_t>(
+                (pure0 & ~((mask << bits[0]) | (mask << bits[1]))) |
+                ((kTypeFire & mask) << bits[0]) |
+                ((kTypeDragon & mask) << bits[1]));
+            uint8_t t1 = 0, t2 = 0, tEx = 0;
+            PokeTypePair::Split(probe, &t1, &t2, &tEx);
+            if (t1 == kTypeFire && t2 == kTypeDragon) {
+                sShift1 = bits[0];
+                sShift2 = bits[1];
+                sMask = mask;
+                sExMask = static_cast<uint16_t>(~((mask << sShift1) | (mask << sShift2)));
+            } else if (t1 == kTypeDragon && t2 == kTypeFire) {
+                sShift1 = bits[1];
+                sShift2 = bits[0];
+                sMask = mask;
+                sExMask = static_cast<uint16_t>(~((mask << sShift1) | (mask << sShift2)));
+            }
+        }
+    }
+
+    PokeTypePair::Object candidate{};
     candidate.fields.value = static_cast<uint16_t>(
-        (type1 & 0x1F) | ((type2 & 0x1F) << 5) | (origPair.fields.value & 0xFC00));
+        (origPair.fields.value & sExMask) |
+        ((type1 & sMask) << sShift1) |
+        ((type2 & sMask) << sShift2));
 
     uint8_t chk1 = 0, chk2 = 0, chkEx = 0;
-    Dpr::Battle::Logic::PokeTypePair::Split(candidate, &chk1, &chk2, &chkEx);
+    PokeTypePair::Split(candidate, &chk1, &chk2, &chkEx);
     if (chk1 == type1 && chk2 == type2) {
         return candidate;
     }
-
-    candidate.fields.value = static_cast<uint16_t>((type1 & 0xFF) | ((type2 & 0xFF) << 8));
-    Dpr::Battle::Logic::PokeTypePair::Split(candidate, &chk1, &chk2, &chkEx);
-    if (chk1 == type1 && chk2 == type2) {
-        return candidate;
-    }
-
     return origPair;
 }
 
@@ -730,33 +768,56 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
 
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
     static XLSXContent::PersonalTable::SheetPersonal::Object* Callback(int32_t monsno, uint16_t formno) {
-        if (monsno == mega::kCharizardSpecies &&
-            (formno == mega::kMegaXForm || formno == mega::kMegaYForm)) {
+        if (monsno == mega::kCharizardSpecies) {
             auto* base = Orig(monsno, mega::kBaseForm);
-            if (base != nullptr && base->klass != nullptr) {
-                auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
-                    il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
-                if (clone != nullptr) {
-                    std::memcpy(&clone->fields, &base->fields,
-                                sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
-                    const auto& md = (formno == mega::kMegaXForm) ? mega::kMegaX : mega::kMegaY;
-                    clone->fields.basic_hp = static_cast<uint8_t>(md.hp);
-                    clone->fields.basic_atk = static_cast<uint8_t>(md.attack);
-                    clone->fields.basic_def = static_cast<uint8_t>(md.defense);
-                    clone->fields.basic_spatk = static_cast<uint8_t>(md.specialAttack);
-                    clone->fields.basic_spdef = static_cast<uint8_t>(md.specialDefense);
-                    clone->fields.basic_agi = static_cast<uint8_t>(md.speed);
-                    clone->fields.type1 = static_cast<uint8_t>(md.primaryType);
-                    clone->fields.type2 = static_cast<uint8_t>(md.secondaryType);
-                    clone->fields.tokusei1 = static_cast<uint16_t>(md.ability);
-                    clone->fields.tokusei2 = static_cast<uint16_t>(md.ability);
-                    clone->fields.tokusei3 = static_cast<uint16_t>(md.ability);
-                    clone->fields.weight = (formno == mega::kMegaXForm) ? 1105 : 1005;
-                    return clone;
+            if (base != nullptr) {
+                // Luminescent Platinum changes base Charizard (form 0) to Fire/Dragon in romfs.
+                // Enforce standard Fire/Flying for base Charizard (form 0) and Mega Charizard Y (form 2),
+                // and Fire/Dragon exclusively for Mega Charizard X (form 1).
+                if (formno == mega::kBaseForm) {
+                    base->fields.type1 = mega::kTypeFire;
+                    base->fields.type2 = mega::kTypeFlying;
+                    return base;
+                }
+                if ((formno == mega::kMegaXForm || formno == mega::kMegaYForm) && base->klass != nullptr) {
+                    auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
+                        il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
+                    if (clone != nullptr) {
+                        std::memcpy(&clone->fields, &base->fields,
+                                    sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
+                        const auto& md = (formno == mega::kMegaXForm) ? mega::kMegaX : mega::kMegaY;
+                        clone->fields.basic_hp = static_cast<uint8_t>(md.hp);
+                        clone->fields.basic_atk = static_cast<uint8_t>(md.attack);
+                        clone->fields.basic_def = static_cast<uint8_t>(md.defense);
+                        clone->fields.basic_spatk = static_cast<uint8_t>(md.specialAttack);
+                        clone->fields.basic_spdef = static_cast<uint8_t>(md.specialDefense);
+                        clone->fields.basic_agi = static_cast<uint8_t>(md.speed);
+                        clone->fields.type1 = static_cast<uint8_t>(md.primaryType);
+                        clone->fields.type2 = static_cast<uint8_t>(md.secondaryType);
+                        clone->fields.tokusei1 = static_cast<uint16_t>(md.ability);
+                        clone->fields.tokusei2 = static_cast<uint16_t>(md.ability);
+                        clone->fields.tokusei3 = static_cast<uint16_t>(md.ability);
+                        clone->fields.weight = (formno == mega::kMegaXForm) ? 1105 : 1005;
+                        return clone;
+                    }
                 }
             }
         }
         return Orig(monsno, formno);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
+    static void Callback(int32_t monsno, uint16_t formno) {
+        Orig(monsno, formno);
+        if (monsno == mega::kCharizardSpecies) {
+            if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
+                pClass != nullptr && pClass->static_fields != nullptr) {
+                if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno); patched != nullptr) {
+                    pClass->static_fields->s_PersonalData = patched;
+                }
+            }
+        }
     }
 };
 
@@ -768,9 +829,7 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
             if (form == mega::kMegaXForm) {
                 return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeDragon);
             }
-            if (form == mega::kMegaYForm) {
-                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
-            }
+            return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
         }
         return origPair;
     }
@@ -780,16 +839,10 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$IsMatchType) {
     static bool Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, uint8_t type) {
         if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
             const uint8_t form = __this->GetFormNo();
-            if (form == mega::kMegaXForm) {
-                uint8_t t1 = 0, t2 = 0, tEx = 0;
-                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
-                return type == mega::kTypeFire || type == mega::kTypeDragon || (tEx < 18 && type == tEx);
-            }
-            if (form == mega::kMegaYForm) {
-                uint8_t t1 = 0, t2 = 0, tEx = 0;
-                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
-                return type == mega::kTypeFire || type == mega::kTypeFlying || (tEx < 18 && type == tEx);
-            }
+            uint8_t t1 = 0, t2 = 0, tEx = 0;
+            Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
+            const uint8_t secondType = (form == mega::kMegaXForm) ? mega::kTypeDragon : mega::kTypeFlying;
+            return type == mega::kTypeFire || type == secondType || (tEx < 18 && type == tEx);
         }
         return Orig(__this, type);
     }
@@ -800,11 +853,8 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType1) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
-            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
-            const uint16_t form = __this->GetFormNo();
-            if (form == mega::kMegaXForm) return mega::kTypeFire;
-            if (form == mega::kMegaYForm) return mega::kTypeFire;
+        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+            return mega::kTypeFire;
         }
         return Orig(__this);
     }
@@ -815,11 +865,12 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() &&
-            __this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
+        if (__this != nullptr && __this->GetMonsNo() == mega::kCharizardSpecies) {
             const uint16_t form = __this->GetFormNo();
-            if (form == mega::kMegaXForm) return mega::kTypeDragon;
-            if (form == mega::kMegaYForm) return mega::kTypeFlying;
+            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded() && form == mega::kMegaXForm) {
+                return mega::kTypeDragon;
+            }
+            return mega::kTypeFlying;
         }
         return Orig(__this);
     }
@@ -1167,6 +1218,7 @@ void installSharedPostInitHooks() {
     CoreParam$$GetType1::InstallAtOffset(0x0204a9f0);
     CoreParam$$GetType2::InstallAtOffset(0x0204aaf0);
     PersonalSystem$$GetPersonalData::InstallAtOffset(0x024a0ca0);
+    PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
