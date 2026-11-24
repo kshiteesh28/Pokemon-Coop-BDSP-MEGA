@@ -268,130 +268,200 @@ def make_solid_shaded_tex(rgb_base: tuple[float, float, float], rgb_hi: tuple[fl
 
 
 def build_mega_absol(van_data: dict) -> tuple[dict, Path]:
-    """Builds Omega Ruby-faithful Mega Absol (pm0359_01_00)."""
+    """Builds Mega Absol (pm0359_01_00) directly from Pokemon-3D-api's official pm0359_51_00 GLB
+    (assets/mega/359-mega.glb), cleanly rigged onto vanilla BDSP Absol's exact 48-bone skeleton.
+    """
     out_dir = WORK_DIR / "mega_absol"
     out_dir.mkdir(parents=True, exist_ok=True)
+    glb_path = REPO_ROOT / "assets/mega/359-mega.glb"
+    if not glb_path.exists():
+        raise FileNotFoundError(f"Missing Mega Absol GLB: {glb_path}")
 
+    # Build clean RGBA32 textures matching Unity WrapU=Mirror & scale=(2,1).
+    # Body01_col encodes indigo-slate in v in [0.0, 0.65] and vivid crimson-red eye iris in v in [0.75, 1.0].
     meta = {}
-    t_white = make_solid_shaded_tex((0.89, 0.91, 0.96), (0.99, 0.99, 1.00))
-    t_slate = make_solid_shaded_tex((0.23, 0.28, 0.42), (0.34, 0.40, 0.56))
+    t_white = make_solid_shaded_tex((0.92, 0.94, 0.98), (1.00, 1.00, 1.00))
+    t_slate = make_solid_shaded_tex((0.20, 0.27, 0.44), (0.31, 0.39, 0.60))
+    t_body01 = t_slate.copy()
+    h1 = t_body01.shape[0]
+    t_body01[int(h1 * 0.72):, :, 0] = 0.90
+    t_body01[int(h1 * 0.72):, :, 1] = 0.14
+    t_body01[int(h1 * 0.72):, :, 2] = 0.20
+    t_body01[int(h1 * 0.72):, :, 3] = 1.0
+
     for stem, arr in [
         ("Body00_col", t_white),
         ("BodyVco_col", t_white),
-        ("Body01_col", t_slate),
+        ("Body01_col", t_body01),
         ("Body02_col", t_slate),
     ]:
         w, h = save_rgba_and_png(arr, out_dir, stem)
         meta[stem] = [w, h]
     (out_dir / "textures.json").write_text(json.dumps(meta, indent=2))
 
-    verts = [list(v) for v in van_data["verts"]]
-    normals = [list(n) for n in van_data["normals"]]
-    uvs = [list(u) for u in van_data["uvs"]]
-    weights = [list(w) for w in van_data["weights"]]
-    indices = [list(i) for i in van_data["indices"]]
-    submeshes = [list(s) for s in van_data["submeshes"]]
+    # Import official pm0359_51_00 GLB in a clean Blender scene
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=str(glb_path))
 
-    # 1. Enhance vanilla main scythe horn (+X in sub[0] Body01) slightly wider/longer & smoother
-    for vi in set(submeshes[0]):
-        if indices[vi][0] == 4:
-            x, y, z = verts[vi]
-            if x > 0.08 and y > 0.78:
-                ht = max(0.0, min(1.0, (y - 0.78) / 0.40))
-                verts[vi] = [x + 0.035 * ht, y + 0.07 * ht, z - 0.03 * ht]
+    arm = bpy.data.objects["Object_3"]
+    pal_img = bpy.data.images["PaletteBaseColor"]
+    pw, ph = pal_img.size[0], pal_img.size[1]
+    pal_px = np.array(pal_img.pixels[:], dtype=np.float32).reshape(ph, pw, 4)
 
-    # 2. Elongate flowing left-side bangs (Hair1..3 in sub[2])
-    for vi in set(submeshes[2]):
-        if indices[vi][0] in (5, 6, 7):
-            x, y, z = verts[vi]
-            ht = max(0.0, min(1.0, (0.82 - y) / 0.25))
-            verts[vi] = [x - 0.025 * ht, y - 0.09 * ht, z + 0.035 * ht]
+    van_bone_idx = {b["name"]: int(b["idx"]) for b in van_data["bones"]}
+    explicit_alias = {
+        "Waist": "Hips",
+        "Origin": "Spine1",
+        "Neck3": "Neck2",
+        "LHair1": "Hair1",
+        "LHair2": "Hair2",
+        "LHair3": "Hair3",
+        "LHair4": "Hair3",
+        "RHair1": "Head",
+        "RHair2": "Head",
+        "LFeelerB3": "LFeelerB2",
+        "RFeelerB3": "RFeelerB2",
+        "LFeelerC": "LForeArm",
+        "RFeelerC": "RForeArm",
+        "LFeelerD": "LFoot",
+        "RFeelerD": "RFoot",
+    }
 
-    # 3. Secondary curved indigo horn on left side (-X, Head=4, sub[0])
-    head_wf = lambda _p: ([1.0, 0.0, 0.0, 0.0], [4, 0, 0, 0])
-    uv_mid = lambda _f: (0.25, 0.50)
-    horn2 = sample_catmull_rom([
-        (-0.085, 0.80, 0.26),
-        (-0.145, 0.86, 0.23),
-        (-0.185, 0.94, 0.18),
-        (-0.175, 1.03, 0.15),
-    ], samples_per_seg=3)
-    r_h2 = [(0.026 * (1.0 - 0.88 * (i / max(len(horn2) - 1, 1))) + 0.003,
-             0.015 * (1.0 - 0.88 * (i / max(len(horn2) - 1, 1))) + 0.003) for i in range(len(horn2))]
-    add_lofted_tube(verts, normals, uvs, weights, indices, submeshes[0], horn2, r_h2, head_wf, uv_mid, sides=10)
+    def map_glb_bone_to_van(bname: str) -> int:
+        cur = arm.data.bones.get(bname)
+        visited = set()
+        while cur is not None and cur.name not in visited:
+            visited.add(cur.name)
+            base = cur.name.rsplit("_", 1)[0] if "_" in cur.name else cur.name
+            if base.startswith("End"):
+                base = base[3:]
+            if base in van_bone_idx:
+                return van_bone_idx[base]
+            if base in explicit_alias:
+                return van_bone_idx[explicit_alias[base]]
+            if base.startswith("LFeeler"):
+                return van_bone_idx["LFeelerB2"]
+            if base.startswith("RFeeler"):
+                return van_bone_idx["RFeelerB2"]
+            cur = cur.parent
+        return van_bone_idx["Spine1"]
 
-    # 4. ONE CONTINUOUS, LUSH, SOLID SCULPTED ANGELIC FEATHERED WHITE WING PER SIDE (sub[2] BodyVco)
-    #    ZERO air gaps between roots! Broad fluffy base emerging from shoulder/back -> 5 crisp feather tips!
-    for sign, b_outer, b_inner in ((-1.0, 13, 12), (1.0, 15, 14)):
-        wing_wf = lambda _p, bo=b_outer, bi=b_inner: ([0.65, 0.35, 0.0, 0.0], [bo, bi, 0, 0])
-        root_pts = [
-            (sign * 0.08, 0.67, 0.08),   # Upper shoulder-mane attachment
-            (sign * 0.11, 0.61, 0.01),
-            (sign * 0.10, 0.55, -0.07),  # Lower back attachment
-        ]
-        # 5 lush overlapping angelic feather tips with clean shallow-to-medium notches (solid wing body!)
-        tip_pts = [
-            (sign * 0.12, 0.72, 0.04),   # Front wing leading edge
-            (sign * 0.44, 1.12, -0.36),  # Primary top feather tip (longest)
-            (sign * 0.30, 0.88, -0.22),  # Notch 1
-            (sign * 0.48, 0.94, -0.40),  # Feather 2 tip
-            (sign * 0.31, 0.76, -0.24),  # Notch 2
-            (sign * 0.44, 0.78, -0.38),  # Feather 3 tip
-            (sign * 0.28, 0.67, -0.22),  # Notch 3
-            (sign * 0.37, 0.65, -0.32),  # Feather 4 tip
-            (sign * 0.22, 0.58, -0.18),  # Notch 4
-            (sign * 0.26, 0.54, -0.24),  # Innermost small covert feather
-            (sign * 0.10, 0.53, -0.09),  # Clean lower back closure
-        ]
-        add_sculpted_sheet(
-            verts, normals, uvs, weights, indices, submeshes[2],
-            root_pts, tip_pts,
-            lambda fu, fv: 0.036 * (1.0 - 0.82 * (fv ** 1.2)) * (0.45 + 0.55 * math.sin(math.pi * fu)) + 0.004,
-            wing_wf, lambda _fu, fv: (0.25, 0.20 + 0.70 * fv),
-            np.array([sign * 0.82, 0.25, 0.52]),
-            sub_per_seg=3, nv=7, camber_amp=0.032,
-        )
+    scale = 0.0096
+    mesh_objs = [bpy.data.objects[n] for n in ("Object_6", "Object_7", "Object_8", "Object_9") if n in bpy.data.objects]
 
-    # 5. Curved wavy saw-blade tail (Tail=33, sub[0] Body01)
-    submeshes[0] = [
-        vi for t in range(0, len(submeshes[0]), 3)
-        for vi in (submeshes[0][t], submeshes[0][t + 1], submeshes[0][t + 2])
-        if not any(indices[v][0] == 33 for v in (submeshes[0][t], submeshes[0][t + 1], submeshes[0][t + 2]))
-    ]
-    tail_wf = lambda _p: ([1.0, 0.0, 0.0, 0.0], [33, 0, 0, 0])
-    tail_root = [(0.0, 0.60, -0.34), (0.0, 0.65, -0.58), (0.0, 0.56, -0.84), (0.0, 0.42, -1.00)]
-    tail_edge = [
-        (0.0, 0.54, -0.36),
-        (0.0, 0.55, -0.50),
-        (0.0, 0.59, -0.58),
-        (0.0, 0.51, -0.68),
-        (0.0, 0.55, -0.76),
-        (0.0, 0.46, -0.86),
-        (0.0, 0.42, -1.00),
-    ]
-    add_sculpted_sheet(
-        verts, normals, uvs, weights, indices, submeshes[0],
-        tail_root, tail_edge,
-        lambda fu, fv: 0.022 * (1.0 - 0.75 * fu) * (1.0 - 0.85 * fv) + 0.002,
-        tail_wf, lambda _fu, _fv: (0.25, 0.50),
-        np.array([1.0, 0.0, 0.0]),
-        sub_per_seg=3, nv=5, camber_amp=0.0,
+    # Compute exact ground offset (minY in Unity space) so paws sit flush at y=0
+    min_y = min(
+        (obj.matrix_world @ v.co).z * scale
+        for obj in mesh_objs
+        for v in obj.data.vertices
     )
 
-    # 6. Sharp indigo heel & elbow spurs
-    for sign, b_arm, b_foot in ((-1.0, 20, 36), (1.0, 27, 43)):
-        awf = lambda _p, b=b_arm: ([1.0, 0.0, 0.0, 0.0], [b, 0, 0, 0])
-        fwf = lambda _p, b=b_foot: ([1.0, 0.0, 0.0, 0.0], [b, 0, 0, 0])
-        el = sample_catmull_rom([(sign * 0.105, 0.28, 0.05), (sign * 0.115, 0.31, -0.02), (sign * 0.120, 0.35, -0.09)], samples_per_seg=2)
-        hl = sample_catmull_rom([(sign * 0.115, 0.20, -0.44), (sign * 0.125, 0.25, -0.52), (sign * 0.125, 0.32, -0.57)], samples_per_seg=2)
-        for pts, wf in ((el, awf), (hl, fwf)):
-            rads = [(0.017 * (1.0 - 0.88 * (i / max(len(pts) - 1, 1))) + 0.002,
-                     0.012 * (1.0 - 0.88 * (i / max(len(pts) - 1, 1))) + 0.002) for i in range(len(pts))]
-            add_lofted_tube(verts, normals, uvs, weights, indices, submeshes[0], pts, rads, wf, uv_mid, sides=8)
+    verts: list[list[float]] = []
+    normals: list[list[float]] = []
+    uvs: list[list[float]] = []
+    weights: list[list[float]] = []
+    indices: list[list[int]] = []
+    submeshes: list[list[int]] = [[] for _ in range(6)]
+
+    for obj in mesh_objs:
+        me = obj.data
+        me.calc_loop_triangles()
+        uv_data = me.uv_layers[0].data
+        mw = obj.matrix_world
+        n_mat = mw.to_3x3().inverted_safe().transposed()
+        vg_to_van = {vg.index: map_glb_bone_to_van(vg.name) for vg in obj.vertex_groups}
+
+        # Precompute normalized top-4 bone weights per vertex
+        v_bone_w = []
+        v_bone_i = []
+        for v in me.vertices:
+            acc: dict[int, float] = {}
+            for g in v.groups:
+                if g.weight > 1e-5:
+                    bi = vg_to_van.get(g.group, 0)
+                    acc[bi] = acc.get(bi, 0.0) + float(g.weight)
+            if not acc:
+                acc[0] = 1.0
+            top4 = sorted(acc.items(), key=lambda kv: kv[1], reverse=True)[:4]
+            total = sum(w for _, w in top4) or 1.0
+            ws = [w / total for _, w in top4] + [0.0] * (4 - len(top4))
+            is_ = [b for b, _ in top4] + [0] * (4 - len(top4))
+            v_bone_w.append(ws)
+            v_bone_i.append(is_)
+
+        # Split vertices by (orig_vi, submesh_idx, uv_bucket) so material boundaries stay razor-sharp
+        vert_cache: dict[tuple[int, int, int], int] = {}
+
+        def classify_tri(tri) -> tuple[int, tuple[float, float], int]:
+            u, vv = uv_data[tri.loops[0]].uv
+            xi = min(pw - 1, max(0, int(u * pw)))
+            yi = min(ph - 1, max(0, int(vv * ph)))
+            r, g, b = float(pal_px[yi, xi, 0]), float(pal_px[yi, xi, 1]), float(pal_px[yi, xi, 2])
+            if obj.name == "Object_9":
+                if r > 0.65 and g < 0.35:
+                    return 0, (0.25, 0.88), 1   # Vivid crimson iris in Body01 upper band
+                if r > 0.70 and g > 0.70 and b > 0.70:
+                    return 2, (0.25, 0.50), 0   # Crisp white eye sclera in BodyVco
+                return 0, (0.25, 0.25), 0       # Indigo eyelid in Body01 lower band
+            if obj.name == "Object_7":
+                return 0, (0.25, 0.25), 0       # Indigo mouth outline in Body01
+            if obj.name == "Object_8":
+                if tri.material_index == 0:
+                    return 2, (0.25, 0.50), 0   # Angelic white wings & mane -> BodyVco
+                return 5, (0.25, 0.50), 0       # Indigo head/wing accents -> Body02
+            # Object_6 (body, legs, horn, tail, claws)
+            if tri.material_index == 0:
+                return 4, (0.25, 0.50), 0       # Snow-white body fur -> Body00
+            return 0, (0.25, 0.25), 0           # Indigo face/horn/claws/tail -> Body01
+
+        for tri in me.loop_triangles:
+            sub_idx, uv_pt, bucket = classify_tri(tri)
+            tri_out = []
+            for vi in tri.vertices:
+                key = (vi, sub_idx, bucket)
+                if key not in vert_cache:
+                    p = mw @ me.vertices[vi].co
+                    n = (n_mat @ me.vertices[vi].normal).normalized()
+                    vert_cache[key] = len(verts)
+                    verts.append([float(-p.x * scale), float(p.z * scale - min_y), float(-p.y * scale)])
+                    normals.append([float(-n.x), float(n.z), float(-n.y)])
+                    uvs.append([uv_pt[0], uv_pt[1]])
+                    weights.append(v_bone_w[vi])
+                    indices.append(v_bone_i[vi])
+                tri_out.append(vert_cache[key])
+            # Flip winding [a, c, b] because (-x, z, -y) has det=-1 (matches Unity's outward winding!)
+            submeshes[sub_idx].extend([tri_out[0], tri_out[2], tri_out[1]])
+
+    # Keep submesh[1] (Eye) and submesh[3] (Mouth) non-empty with 1 tiny hidden triangle inside head
+    for empty_sub in (1, 3):
+        if not submeshes[empty_sub]:
+            base_i = len(verts)
+            for dx, dy, dz in ((0.0, 0.72, 0.22), (0.001, 0.72, 0.22), (0.0, 0.721, 0.22)):
+                verts.append([dx, dy, dz])
+                normals.append([0.0, 0.0, 1.0])
+                uvs.append([0.25, 0.50])
+                weights.append([1.0, 0.0, 0.0, 0.0])
+                indices.append([4, 0, 0, 0])
+            submeshes[empty_sub].extend([base_i, base_i + 1, base_i + 2])
+
+    # Mathematical sanity check: verify outward winding matches vanilla BDSP convention
+    pos_w = neg_w = 0
+    for s in submeshes:
+        for t in range(0, len(s), 3):
+            a, b, c = s[t], s[t + 1], s[t + 2]
+            e1 = np.array(verts[b]) - np.array(verts[a])
+            e2 = np.array(verts[c]) - np.array(verts[a])
+            fn = np.cross(e1, e2)
+            nv = np.array(normals[a]) + np.array(normals[b]) + np.array(normals[c])
+            if float(np.dot(fn, nv)) >= 0.0:
+                pos_w += 1
+            else:
+                neg_w += 1
+    assert pos_w > neg_w * 10, f"Winding check failed: pos={pos_w}, neg={neg_w}"
 
     mesh_payload = {"verts": verts, "normals": normals, "uvs": uvs, "weights": weights, "indices": indices, "submeshes": submeshes}
     (out_dir / "mesh.json").write_text(json.dumps(mesh_payload))
-    print(f"Built Mega Absol -> {out_dir}/mesh.json (verts={len(verts)}, tris={sum(len(s)//3 for s in submeshes)})")
+    print(f"Built Mega Absol (from 359-mega.glb) -> {out_dir}/mesh.json (verts={len(verts)}, tris={sum(len(s)//3 for s in submeshes)}, winding pos={pos_w}/neg={neg_w})")
     return mesh_payload, out_dir
 
 
