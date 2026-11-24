@@ -69,8 +69,15 @@ constexpr int kMegaAbsolForm = 1;
 constexpr int kMegaAbsolZForm = 2;
 
 // Verified item indices from src/mod/data/items.h (line - 4).
-constexpr uint16_t kFireStone = 82;       // Fallback BDSP stone icon sprite (Charizardite)
-constexpr uint16_t kDuskStone = 108;      // Fallback BDSP stone icon sprite (Absolite / Absolite Z)
+constexpr uint16_t kSunStone = 80;        // Fallback BDSP stone icon sprites
+constexpr uint16_t kMoonStone = 81;
+constexpr uint16_t kFireStone = 82;
+constexpr uint16_t kThunderStone = 83;
+constexpr uint16_t kWaterStone = 84;
+constexpr uint16_t kLeafStone = 85;
+constexpr uint16_t kShinyStone = 107;
+constexpr uint16_t kDuskStone = 108;
+constexpr uint16_t kDawnStone = 109;
 constexpr uint16_t kOddKeystone = 111;    // Fallback BDSP keystone icon sprite
 constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket (field_func = 0)
 constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (field_func = 0)
@@ -81,6 +88,140 @@ constexpr uint16_t kCharizarditeY = 678;
 constexpr uint16_t kMegaRing = 696;
 constexpr uint16_t kMegaBracelet = 744;
 constexpr uint16_t kKeyStone = 773;
+constexpr uint16_t kIceStone = 849;
+
+struct MegaStoneCatalogEntry {
+    uint16_t itemId;
+    uint16_t fallbackIconId;
+    const char* stoneName;
+    const char* stoneDesc;
+};
+
+// All 92 official Mega Stones (47 Gen VI XY/ORAS + 45 Gen IX Legends: Z-A / Mega Dimension DLC).
+// Every itemId is strictly < 1278 (safe within BDSP ItemTable and SAV8BS.MaxItemID).
+constexpr MegaStoneCatalogEntry kAllMegaStones[] = {
+    // --- Gen VI: Pokémon X & Y (30) ---
+    { 656, kDuskStone,    "Gengarite",      "One of a variety of mysterious Mega Stones. Have Gengar hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 657, kShinyStone,   "Gardevoirite",   "One of a variety of mysterious Mega Stones. Have Gardevoir hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 658, kThunderStone, "Ampharosite",    "One of a variety of mysterious Mega Stones. Have Ampharos hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 659, kLeafStone,    "Venusaurite",    "One of a variety of mysterious Mega Stones. Have Venusaur hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 660, kFireStone,    "Charizardite X", "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 661, kWaterStone,   "Blastoisinite",  "One of a variety of mysterious Mega Stones. Have Blastoise hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 662, kMoonStone,    "Mewtwonite X",   "One of a variety of mysterious Mega Stones. Have Mewtwo hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 663, kShinyStone,   "Mewtwonite Y",   "One of a variety of mysterious Mega Stones. Have Mewtwo hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 664, kFireStone,    "Blazikenite",    "One of a variety of mysterious Mega Stones. Have Blaziken hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 665, kSunStone,     "Medichamite",    "One of a variety of mysterious Mega Stones. Have Medicham hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 666, kFireStone,    "Houndoominite",  "One of a variety of mysterious Mega Stones. Have Houndoom hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 667, kMoonStone,    "Aggronite",      "One of a variety of mysterious Mega Stones. Have Aggron hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 668, kDuskStone,    "Banettite",      "One of a variety of mysterious Mega Stones. Have Banette hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 669, kDuskStone,    "Tyranitarite",   "One of a variety of mysterious Mega Stones. Have Tyranitar hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 670, kFireStone,    "Scizorite",      "One of a variety of mysterious Mega Stones. Have Scizor hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 671, kSunStone,     "Pinsirite",      "One of a variety of mysterious Mega Stones. Have Pinsir hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 672, kMoonStone,    "Aerodactylite",  "One of a variety of mysterious Mega Stones. Have Aerodactyl hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 673, kDawnStone,    "Lucarionite",    "One of a variety of mysterious Mega Stones. Have Lucario hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 674, kIceStone,     "Abomasite",      "One of a variety of mysterious Mega Stones. Have Abomasnow hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 675, kSunStone,     "Kangaskhanite",  "One of a variety of mysterious Mega Stones. Have Kangaskhan hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 676, kWaterStone,   "Gyaradosite",    "One of a variety of mysterious Mega Stones. Have Gyarados hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 677, kDuskStone,    "Absolite",       "One of a variety of mysterious Mega Stones. Have Absol hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 678, kFireStone,    "Charizardite Y", "One of a variety of mysterious Mega Stones. Have Charizard hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 679, kSunStone,     "Alakazite",      "One of a variety of mysterious Mega Stones. Have Alakazam hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 680, kDawnStone,    "Heracronite",    "One of a variety of mysterious Mega Stones. Have Heracross hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 681, kShinyStone,   "Mawilite",       "One of a variety of mysterious Mega Stones. Have Mawile hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 682, kThunderStone, "Manectite",      "One of a variety of mysterious Mega Stones. Have Manectric hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 683, kDawnStone,    "Garchompite",    "One of a variety of mysterious Mega Stones. Have Garchomp hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 684, kShinyStone,   "Latiasite",      "One of a variety of mysterious Mega Stones. Have Latias hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 685, kDawnStone,    "Latiosite",      "One of a variety of mysterious Mega Stones. Have Latios hold it, and this stone will enable it to Mega Evolve during battle." },
+    // --- Gen VI: Pokémon Omega Ruby & Alpha Sapphire (17) ---
+    { 752, kWaterStone,   "Swampertite",    "One of a variety of mysterious Mega Stones. Have Swampert hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 753, kLeafStone,    "Sceptilite",     "One of a variety of mysterious Mega Stones. Have Sceptile hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 754, kDuskStone,    "Sablenite",      "One of a variety of mysterious Mega Stones. Have Sableye hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 755, kShinyStone,   "Altarianite",    "One of a variety of mysterious Mega Stones. Have Altaria hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 756, kDawnStone,    "Galladite",      "One of a variety of mysterious Mega Stones. Have Gallade hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 757, kShinyStone,   "Audinite",       "One of a variety of mysterious Mega Stones. Have Audino hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 758, kDawnStone,    "Metagrossite",   "One of a variety of mysterious Mega Stones. Have Metagross hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 759, kWaterStone,   "Sharpedonite",   "One of a variety of mysterious Mega Stones. Have Sharpedo hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 760, kWaterStone,   "Slowbronite",    "One of a variety of mysterious Mega Stones. Have Slowbro hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 761, kMoonStone,    "Steelixite",     "One of a variety of mysterious Mega Stones. Have Steelix hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 762, kSunStone,     "Pidgeotite",     "One of a variety of mysterious Mega Stones. Have Pidgeot hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 763, kIceStone,     "Glalitite",      "One of a variety of mysterious Mega Stones. Have Glalie hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 764, kShinyStone,   "Diancite",       "One of a variety of mysterious Mega Stones. Have Diancie hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 767, kFireStone,    "Cameruptite",    "One of a variety of mysterious Mega Stones. Have Camerupt hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 768, kSunStone,     "Lopunnite",      "One of a variety of mysterious Mega Stones. Have Lopunny hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 769, kDawnStone,    "Salamencite",    "One of a variety of mysterious Mega Stones. Have Salamence hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 770, kThunderStone, "Beedrillite",    "One of a variety of mysterious Mega Stones. Have Beedrill hold it, and this stone will enable it to Mega Evolve during battle." },
+    // --- Gen IX: Pokémon Legends: Z-A & Mega Dimension DLC (45) ---
+    { 837,  kMoonStone,    "Clefablite",     "One of a variety of mysterious Mega Stones. Have Clefable hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 838,  kLeafStone,    "Victreebelite",  "One of a variety of mysterious Mega Stones. Have Victreebel hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 839,  kWaterStone,   "Starminite",     "One of a variety of mysterious Mega Stones. Have Starmie hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 840,  kSunStone,     "Dragoninite",    "One of a variety of mysterious Mega Stones. Have Dragonite hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 848,  kLeafStone,    "Meganiumite",    "One of a variety of mysterious Mega Stones. Have Meganium hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 859,  kWaterStone,   "Feraligite",     "One of a variety of mysterious Mega Stones. Have Feraligatr hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 867,  kMoonStone,    "Skarmorite",     "One of a variety of mysterious Mega Stones. Have Skarmory hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 868,  kIceStone,     "Froslassite",    "One of a variety of mysterious Mega Stones. Have Froslass hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 869,  kFireStone,    "Heatranite",     "One of a variety of mysterious Mega Stones. Have Heatran hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 870,  kDuskStone,    "Darkranite",     "One of a variety of mysterious Mega Stones. Have Darkrai hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 871,  kFireStone,    "Emboarite",      "One of a variety of mysterious Mega Stones. Have Emboar hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 897,  kSunStone,     "Excadrite",      "One of a variety of mysterious Mega Stones. Have Excadrill hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 898,  kDuskStone,    "Scolipite",      "One of a variety of mysterious Mega Stones. Have Scolipede hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 899,  kDuskStone,    "Scraftinite",    "One of a variety of mysterious Mega Stones. Have Scrafty hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1058, kThunderStone, "Eelektrossite",  "One of a variety of mysterious Mega Stones. Have Eelektross hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1059, kDuskStone,    "Chandelurite",   "One of a variety of mysterious Mega Stones. Have Chandelure hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1060, kLeafStone,    "Chesnaughtite",  "One of a variety of mysterious Mega Stones. Have Chesnaught hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1061, kFireStone,    "Delphoxite",     "One of a variety of mysterious Mega Stones. Have Delphox hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1062, kWaterStone,   "Greninjite",     "One of a variety of mysterious Mega Stones. Have Greninja hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1063, kFireStone,    "Pyroarite",      "One of a variety of mysterious Mega Stones. Have Pyroar hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1064, kShinyStone,   "Floettite",      "One of a variety of mysterious Mega Stones. Have Floette hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1065, kDuskStone,    "Malamarite",     "One of a variety of mysterious Mega Stones. Have Malamar hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1066, kWaterStone,   "Barbaracite",    "One of a variety of mysterious Mega Stones. Have Barbaracle hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1067, kDuskStone,    "Dragalgite",     "One of a variety of mysterious Mega Stones. Have Dragalge hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1068, kSunStone,     "Hawluchanite",   "One of a variety of mysterious Mega Stones. Have Hawlucha hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1069, kLeafStone,    "Zygardite",      "One of a variety of mysterious Mega Stones. Have Zygarde hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1070, kShinyStone,   "Drampanite",     "One of a variety of mysterious Mega Stones. Have Drampa hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1071, kThunderStone, "Zeraorite",      "One of a variety of mysterious Mega Stones. Have Zeraora hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1072, kSunStone,     "Falinksite",     "One of a variety of mysterious Mega Stones. Have Falinks hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1073, kThunderStone, "Raichunite X",   "One of a variety of mysterious Mega Stones. Have Raichu hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1078, kThunderStone, "Raichunite Y",   "One of a variety of mysterious Mega Stones. Have Raichu hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1079, kShinyStone,   "Chimechite",     "One of a variety of mysterious Mega Stones. Have Chimecho hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 622,  kDuskStone,    "Absolite Z",     "One of a variety of mysterious Mega Stones. An Absol holding this stone will be able to Mega Evolve into Mega Absol Z during battle." },
+    { 1082, kMoonStone,    "Staraptite",     "One of a variety of mysterious Mega Stones. Have Staraptor hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1083, kDawnStone,    "Garchompite Z",  "One of a variety of mysterious Mega Stones. Have Garchomp hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1101, kDawnStone,    "Lucarionite Z",  "One of a variety of mysterious Mega Stones. Have Lucario hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1102, kDuskStone,    "Golurkite",      "One of a variety of mysterious Mega Stones. Have Golurk hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1268, kDawnStone,    "Meowsticite",    "One of a variety of mysterious Mega Stones. Have Meowstic hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1272, kIceStone,     "Crabominite",    "One of a variety of mysterious Mega Stones. Have Crabominable hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1273, kWaterStone,   "Golisopite",     "One of a variety of mysterious Mega Stones. Have Golisopod hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1274, kShinyStone,   "Magearnite",     "One of a variety of mysterious Mega Stones. Have Magearna hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1275, kFireStone,    "Scovillainite",  "One of a variety of mysterious Mega Stones. Have Scovillain hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1276, kIceStone,     "Baxcalibrite",   "One of a variety of mysterious Mega Stones. Have Baxcalibur hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 1277, kWaterStone,   "Tatsugirinite",  "One of a variety of mysterious Mega Stones. Have Tatsugiri hold it, and this stone will enable it to Mega Evolve during battle." },
+    { 426,  kDawnStone,    "Glimmoranite",   "One of a variety of mysterious Mega Stones. Have Glimmora hold it, and this stone will enable it to Mega Evolve during battle." },
+};
+
+constexpr const MegaStoneCatalogEntry* findMegaStoneCatalog(int32_t itemId) {
+    for (const auto& s : kAllMegaStones) {
+        if (static_cast<int32_t>(s.itemId) == itemId) {
+            return &s;
+        }
+    }
+    return nullptr;
+}
+
+constexpr bool validateMegaStoneCatalog() {
+    constexpr size_t kCount = sizeof(kAllMegaStones) / sizeof(kAllMegaStones[0]);
+    if (kCount != 92) return false;
+    for (size_t i = 0; i < kCount; ++i) {
+        if (kAllMegaStones[i].itemId == 0 || kAllMegaStones[i].itemId >= 1278) return false;
+        if (kAllMegaStones[i].fallbackIconId == 0 || kAllMegaStones[i].fallbackIconId >= 1278) return false;
+        for (size_t j = i + 1; j < kCount; ++j) {
+            if (kAllMegaStones[i].itemId == kAllMegaStones[j].itemId) return false;
+        }
+    }
+    return true;
+}
+static_assert(validateMegaStoneCatalog());
+static_assert(findMegaStoneCatalog(kAbsoliteZ) != nullptr);
+static_assert(findMegaStoneCatalog(kCharizarditeX) != nullptr);
+static_assert(findMegaStoneCatalog(426) != nullptr);
 
 // Verified ability IDs from src/mod/data/abilities.h (line - 4).
 constexpr int kDrought = 70;
@@ -465,7 +606,7 @@ inline Dpr::Battle::Logic::PokeTypePair::Object makeDualTypePair(
 void installSharedPostInitHooks();
 
 inline bool isMegaStone(int32_t itemId) {
-    return findMegaByItemId(itemId) != nullptr;
+    return findMegaStoneCatalog(itemId) != nullptr;
 }
 
 inline bool isMegaKeyItem(int32_t itemId) {
@@ -484,7 +625,7 @@ inline bool hasMegaAccessoryInBag() {
     return ownedMegaAccessoryInBag() != 0;
 }
 
-// Patch only the registered Mega Stone & Key Item rows in the loaded master ItemTable once.
+// Patch all 92 Mega Stone rows & 3 Mega Key Item rows in the loaded master ItemTable once.
 inline void patchItemTableInMemory() {
     if (gItemTablePatched) {
         return;
@@ -537,9 +678,10 @@ inline void patchItemTableInMemory() {
         }
     };
 
-    for (const auto& e : kMegaRegistry) {
-        if (e.stoneItemId < items->max_length && e.fallbackIconId < items->max_length) {
-            applyTemplate(items->m_Items[e.stoneItemId], charcoal, items->m_Items[e.fallbackIconId]);
+    for (const auto& s : kAllMegaStones) {
+        if (s.itemId < items->max_length) {
+            auto* iconTmpl = (s.fallbackIconId < items->max_length) ? items->m_Items[s.fallbackIconId] : nullptr;
+            applyTemplate(items->m_Items[s.itemId], charcoal, iconTmpl);
         }
     }
 
@@ -579,6 +721,40 @@ inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) 
     return false;
 }
 
+// Parses the exact trailing numeric item ID from BDSP message labels (e.g. "itemname_0622" -> 622).
+inline int32_t parseTrailingItemId(System::String::Object* label) {
+    if (label == nullptr) {
+        return -1;
+    }
+    const int32_t len = label->fields.m_stringLength;
+    if (len <= 0) {
+        return -1;
+    }
+    const uint16_t* chars = reinterpret_cast<const uint16_t*>(&label->fields.m_firstChar);
+    int32_t end = len - 1;
+    while (end >= 0 && (chars[end] == ' ' || chars[end] == '\0')) {
+        --end;
+    }
+    if (end < 0 || chars[end] < '0' || chars[end] > '9') {
+        return -1;
+    }
+    int32_t start = end;
+    while (start > 0 && chars[start - 1] >= '0' && chars[start - 1] <= '9') {
+        --start;
+    }
+    if (start > 0 && chars[start - 1] != '_') {
+        return -1;
+    }
+    int32_t val = 0;
+    for (int32_t i = start; i <= end; ++i) {
+        val = (val * 10) + static_cast<int32_t>(chars[i] - '0');
+        if (val > 99999) {
+            return -1;
+        }
+    }
+    return val;
+}
+
 inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, System::String::Object* label) {
     if (label == nullptr) {
         return nullptr;
@@ -594,22 +770,25 @@ inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, S
         return nullptr;
     }
 
-    for (const auto& e : kMegaRegistry) {
-        if (utf16ContainsAscii(label, e.itemIdStr)) {
-            return isItemInfo ? e.stoneDesc : e.stoneName;
-        }
+    const int32_t itemId = parseTrailingItemId(label);
+    if (itemId <= 0) {
+        return nullptr;
     }
-    if (utf16ContainsAscii(label, "696")) {
+
+    if (const auto* stone = findMegaStoneCatalog(itemId); stone != nullptr) {
+        return isItemInfo ? stone->stoneDesc : stone->stoneName;
+    }
+    if (itemId == kMegaRing) {
         return isItemInfo
             ? "This ring contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
             : "Mega Ring";
     }
-    if (utf16ContainsAscii(label, "744")) {
+    if (itemId == kMegaBracelet) {
         return isItemInfo
             ? "This bracelet contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
             : "Mega Bracelet";
     }
-    if (utf16ContainsAscii(label, "773")) {
+    if (itemId == kKeyStone) {
         return isItemInfo
             ? "A stone filled with an unexplained power. It makes Pokémon that hold a Mega Stone Mega Evolve."
             : "Key Stone";
@@ -617,17 +796,24 @@ inline const char* lookupMegaItemTextByLabel(System::String::Object* fileName, S
     return nullptr;
 }
 
-inline const char* customMegaAtlasSpriteName(int32_t itemId, bool isLarge) {
-    switch (itemId) {
-        case kAbsoliteZ:     return isLarge ? "item_0622_L" : "item_0622";
-        case kCharizarditeX: return isLarge ? "item_0660_L" : "item_0660";
-        case kAbsolite:      return isLarge ? "item_0677_L" : "item_0677";
-        case kCharizarditeY: return isLarge ? "item_0678_L" : "item_0678";
-        case kMegaRing:      return isLarge ? "item_0696_L" : "item_0696";
-        case kMegaBracelet:  return isLarge ? "item_0744_L" : "item_0744";
-        case kKeyStone:      return isLarge ? "item_0773_L" : "item_0773";
-        default:             return nullptr;
+inline bool formatCustomMegaAtlasSpriteName(int32_t itemId, bool isLarge, char* outBuf, size_t bufSize) {
+    if (outBuf == nullptr || bufSize < 16 || itemId <= 0 || itemId > 9999) {
+        return false;
     }
+    if (!isMegaStone(itemId) && !isMegaKeyItem(itemId)) {
+        return false;
+    }
+    outBuf[0] = 'i'; outBuf[1] = 't'; outBuf[2] = 'e'; outBuf[3] = 'm'; outBuf[4] = '_';
+    outBuf[5] = static_cast<char>('0' + ((itemId / 1000) % 10));
+    outBuf[6] = static_cast<char>('0' + ((itemId / 100) % 10));
+    outBuf[7] = static_cast<char>('0' + ((itemId / 10) % 10));
+    outBuf[8] = static_cast<char>('0' + (itemId % 10));
+    if (isLarge) {
+        outBuf[9] = '_'; outBuf[10] = 'L'; outBuf[11] = '\0';
+    } else {
+        outBuf[9] = '\0';
+    }
+    return true;
 }
 
 inline bool getMegaFlag(const Dpr::Battle::Logic::BTL_ACTION_PARAM::Object& param) {
@@ -999,7 +1185,8 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
 
 HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
     static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
-        if (const char* customName = mega::customMegaAtlasSpriteName(itemId, isLarge); customName != nullptr) {
+        char customName[16];
+        if (mega::formatCustomMegaAtlasSpriteName(itemId, isLarge, customName, sizeof(customName))) {
             Dpr::UI::UIManager::getClass()->initIfNeeded();
             if (auto* uiMgr = Dpr::UI::UIManager::get_Instance(); uiMgr != nullptr) {
                 if (auto* exactSpr = uiMgr->GetAtlasSprite(SpriteAtlasID::TEXTUREMASS, System::String::Create(customName));
@@ -1011,8 +1198,8 @@ HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
                 }
             }
             int32_t fallbackId = mega::kOddKeystone;
-            if (const auto* md = mega::findMegaByItemId(itemId); md != nullptr) {
-                fallbackId = md->fallbackIconId;
+            if (const auto* stone = mega::findMegaStoneCatalog(itemId); stone != nullptr) {
+                fallbackId = stone->fallbackIconId;
             }
             Orig(fallbackId, onLoadedCallback, isUnload, isLarge);
             return;

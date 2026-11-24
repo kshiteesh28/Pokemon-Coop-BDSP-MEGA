@@ -9,11 +9,127 @@ namespace PKLumiHex.Mac;
 
 public partial class MainWindow : Window
 {
+    private const int AbsoliteZ = 622;
     private const int CharizarditeX = 660;
+    private const int Absolite = 677;
     private const int CharizarditeY = 678;
     private const int MegaRing = 696;
     private const int MegaBracelet = 744;
     private const int KeyStone = 773;
+
+    // Exact 1-to-1 mirror of kAllMegaStones (92 stones) + Mega Key Items in src/mega/main.cpp.
+    // Guarantees every Mega Stone appears by name in Bag & Held Item search bars even on unused BDSP slots.
+    private static readonly Dictionary<int, string> MegaStoneNames = new()
+    {
+        // Gen VI: Pokémon X & Y (30)
+        [656] = "Gengarite",
+        [657] = "Gardevoirite",
+        [658] = "Ampharosite",
+        [659] = "Venusaurite",
+        [660] = "Charizardite X",
+        [661] = "Blastoisinite",
+        [662] = "Mewtwonite X",
+        [663] = "Mewtwonite Y",
+        [664] = "Blazikenite",
+        [665] = "Medichamite",
+        [666] = "Houndoominite",
+        [667] = "Aggronite",
+        [668] = "Banettite",
+        [669] = "Tyranitarite",
+        [670] = "Scizorite",
+        [671] = "Pinsirite",
+        [672] = "Aerodactylite",
+        [673] = "Lucarionite",
+        [674] = "Abomasite",
+        [675] = "Kangaskhanite",
+        [676] = "Gyaradosite",
+        [677] = "Absolite",
+        [678] = "Charizardite Y",
+        [679] = "Alakazite",
+        [680] = "Heracronite",
+        [681] = "Mawilite",
+        [682] = "Manectite",
+        [683] = "Garchompite",
+        [684] = "Latiasite",
+        [685] = "Latiosite",
+        // Gen VI: Pokémon Omega Ruby & Alpha Sapphire (17)
+        [752] = "Swampertite",
+        [753] = "Sceptilite",
+        [754] = "Sablenite",
+        [755] = "Altarianite",
+        [756] = "Galladite",
+        [757] = "Audinite",
+        [758] = "Metagrossite",
+        [759] = "Sharpedonite",
+        [760] = "Slowbronite",
+        [761] = "Steelixite",
+        [762] = "Pidgeotite",
+        [763] = "Glalitite",
+        [764] = "Diancite",
+        [767] = "Cameruptite",
+        [768] = "Lopunnite",
+        [769] = "Salamencite",
+        [770] = "Beedrillite",
+        // Gen IX: Pokémon Legends: Z-A & Mega Dimension DLC (45)
+        [837]  = "Clefablite",
+        [838]  = "Victreebelite",
+        [839]  = "Starminite",
+        [840]  = "Dragoninite",
+        [848]  = "Meganiumite",
+        [859]  = "Feraligite",
+        [867]  = "Skarmorite",
+        [868]  = "Froslassite",
+        [869]  = "Heatranite",
+        [870]  = "Darkranite",
+        [871]  = "Emboarite",
+        [897]  = "Excadrite",
+        [898]  = "Scolipite",
+        [899]  = "Scraftinite",
+        [1058] = "Eelektrossite",
+        [1059] = "Chandelurite",
+        [1060] = "Chesnaughtite",
+        [1061] = "Delphoxite",
+        [1062] = "Greninjite",
+        [1063] = "Pyroarite",
+        [1064] = "Floettite",
+        [1065] = "Malamarite",
+        [1066] = "Barbaracite",
+        [1067] = "Dragalgite",
+        [1068] = "Hawluchanite",
+        [1069] = "Zygardite",
+        [1070] = "Drampanite",
+        [1071] = "Zeraorite",
+        [1072] = "Falinksite",
+        [1073] = "Raichunite X",
+        [1078] = "Raichunite Y",
+        [1079] = "Chimechite",
+        [622]  = "Absolite Z",
+        [1082] = "Staraptite",
+        [1083] = "Garchompite Z",
+        [1101] = "Lucarionite Z",
+        [1102] = "Golurkite",
+        [1268] = "Meowsticite",
+        [1272] = "Crabominite",
+        [1273] = "Golisopite",
+        [1274] = "Magearnite",
+        [1275] = "Scovillainite",
+        [1276] = "Baxcalibrite",
+        [1277] = "Tatsugirinite",
+        [426]  = "Glimmoranite",
+    };
+
+    private static readonly Dictionary<int, string> CustomItemNames = BuildCustomItemNames();
+
+    private static Dictionary<int, string> BuildCustomItemNames()
+    {
+        var map = new Dictionary<int, string>(MegaStoneNames)
+        {
+            [MegaRing] = "Mega Ring",
+            [MegaBracelet] = "Mega Bracelet",
+            [KeyStone] = "Key Stone",
+        };
+        return map;
+    }
 
     private SaveFile? _sav;
     private string? _savePath;
@@ -35,7 +151,7 @@ public partial class MainWindow : Window
     private void PopulateLookupLists()
     {
         _speciesChoices = BuildChoiceList(GameInfo.Strings.Species);
-        _itemChoices = BuildChoiceList(GameInfo.Strings.Item);
+        _itemChoices = BuildItemChoiceList(GameInfo.Strings.Item);
         _moveChoices = BuildChoiceList(GameInfo.Strings.Move);
         _abilityChoices = BuildChoiceList(GameInfo.Strings.Ability);
 
@@ -61,11 +177,36 @@ public partial class MainWindow : Window
         return list;
     }
 
+    private static List<string> BuildItemChoiceList(IReadOnlyList<string> source)
+    {
+        int maxId = Math.Max(source.Count - 1, CustomItemNames.Keys.Max());
+        var list = new List<string>(maxId + 1);
+        for (int i = 0; i <= maxId; i++)
+        {
+            string name;
+            if (CustomItemNames.TryGetValue(i, out var custom))
+                name = custom;
+            else if (i < source.Count && !string.IsNullOrWhiteSpace(source[i]))
+                name = source[i];
+            else
+                name = $"#{i}";
+            list.Add($"{name} ({i})");
+        }
+        return list;
+    }
+
     private static string FormatChoice(IReadOnlyList<string> source, int id)
     {
         if (id >= 0 && id < source.Count && !string.IsNullOrWhiteSpace(source[id]))
             return $"{source[id]} ({id})";
         return $"#{id} ({id})";
+    }
+
+    private static string FormatItemChoice(int id)
+    {
+        if (CustomItemNames.TryGetValue(id, out var custom))
+            return $"{custom} ({id})";
+        return FormatChoice(GameInfo.Strings.Item, id);
     }
 
     private static bool TryParseChoiceId(string? text, IReadOnlyList<string> source, out int id)
@@ -82,6 +223,18 @@ public partial class MainWindow : Window
         int close = trimmed.LastIndexOf(')');
         if (open >= 0 && close > open + 1 && int.TryParse(trimmed.Substring(open + 1, close - open - 1), out id))
             return true;
+
+        if (ReferenceEquals(source, GameInfo.Strings.Item))
+        {
+            foreach (var kv in CustomItemNames)
+            {
+                if (string.Equals(kv.Value, trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    id = kv.Key;
+                    return true;
+                }
+            }
+        }
 
         for (int i = 0; i < source.Count; i++)
         {
@@ -267,7 +420,7 @@ public partial class MainWindow : Window
 
         SpeciesAutoBox.Text = FormatChoice(GameInfo.Strings.Species, pk.Species);
         NicknameBox.Text = pk.Nickname;
-        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, pk.HeldItem);
+        HeldItemAutoBox.Text = FormatItemChoice(pk.HeldItem);
         AbilityAutoBox.Text = FormatChoice(GameInfo.Strings.Ability, pk.Ability);
         LevelSpinner.Value = Math.Clamp(pk.CurrentLevel, 1, 100);
         FormSpinner.Value = pk.Form;
@@ -297,13 +450,13 @@ public partial class MainWindow : Window
 
     private void OnGiveCharizarditeX(object? sender, RoutedEventArgs e)
     {
-        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, CharizarditeX);
+        HeldItemAutoBox.Text = FormatItemChoice(CharizarditeX);
         PokemonStatusText.Text = "Selected Charizardite X — click Apply Changes to Slot.";
     }
 
     private void OnGiveCharizarditeY(object? sender, RoutedEventArgs e)
     {
-        HeldItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, CharizarditeY);
+        HeldItemAutoBox.Text = FormatItemChoice(CharizarditeY);
         PokemonStatusText.Text = "Selected Charizardite Y — click Apply Changes to Slot.";
     }
 
@@ -450,7 +603,7 @@ public partial class MainWindow : Window
 
         var itemPart = timesIdx > 0 ? text.Substring(0, timesIdx).Trim() : text;
         if (TryParseChoiceId(itemPart, GameInfo.Strings.Item, out var id))
-            BagItemAutoBox.Text = FormatChoice(GameInfo.Strings.Item, id);
+            BagItemAutoBox.Text = FormatItemChoice(id);
     }
 
     private void OnAddBagItemClick(object? sender, RoutedEventArgs e)
@@ -512,16 +665,19 @@ public partial class MainWindow : Window
         if (_sav is null)
             return;
 
+        var kitStones = new[] { CharizarditeX, CharizarditeY, Absolite, AbsoliteZ };
+        var kitKeys = new[] { MegaBracelet, MegaRing, KeyStone };
+
         if (_sav is SAV8BS sav8bs)
         {
-            foreach (var id in new[] { CharizarditeX, CharizarditeY, MegaBracelet, MegaRing, KeyStone })
+            foreach (var id in kitStones.Concat(kitKeys))
             {
                 if (id <= sav8bs.MaxItemID)
                     SetBdspItemCount(sav8bs, id, 1);
             }
             PocketPicker.SelectedIndex = 0;
             RefreshBagList();
-            BagStatusText.Text = "Added Mega Bracelet (744), Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save (+ .bak)!";
+            BagStatusText.Text = "Added Mega Ring/Bracelet/Key Stone, Charizardite X/Y, and Absolite / Absolite Z. Click Save (+ .bak)!";
             return;
         }
 
@@ -535,15 +691,59 @@ public partial class MainWindow : Window
             return;
         }
 
-        UpsertItemInPouch(itemsPouch, CharizarditeX, 1);
-        UpsertItemInPouch(itemsPouch, CharizarditeY, 1);
+        foreach (var id in kitStones) UpsertItemInPouch(itemsPouch, id, 1);
+        foreach (var id in kitKeys) UpsertItemInPouch(keyPouch, id, 1);
+        _sav.Inventory = pouches;
+
+        RefreshBagList();
+        BagStatusText.Text = "Added Mega Ring/Bracelet/Key Stone, Charizardite X/Y, and Absolite / Absolite Z. Click Save!";
+    }
+
+    private void OnGrantAllMegaStonesClick(object? sender, RoutedEventArgs e)
+    {
+        if (_sav is null)
+            return;
+
+        int added = 0;
+        if (_sav is SAV8BS sav8bs)
+        {
+            foreach (var id in MegaStoneNames.Keys)
+            {
+                if (id <= sav8bs.MaxItemID && SetBdspItemCount(sav8bs, id, 1))
+                    added++;
+            }
+            foreach (var id in new[] { MegaBracelet, MegaRing, KeyStone })
+            {
+                if (id <= sav8bs.MaxItemID)
+                    SetBdspItemCount(sav8bs, id, 1);
+            }
+            PocketPicker.SelectedIndex = 0;
+            RefreshBagList();
+            BagStatusText.Text = $"Added all {added} Mega Stones + Mega Key Items to BDSP Bag. Click Save (+ .bak)!";
+            return;
+        }
+
+        var pouches = _sav.Inventory;
+        var itemsPouch = pouches.FirstOrDefault(p => p.Type == InventoryType.Items) ?? pouches.FirstOrDefault();
+        var keyPouch = pouches.FirstOrDefault(p => p.Type == InventoryType.KeyItems) ?? itemsPouch;
+        if (itemsPouch is null || keyPouch is null)
+        {
+            BagStatusText.Text = "Could not locate Bag pockets in this save.";
+            return;
+        }
+
+        foreach (var id in MegaStoneNames.Keys)
+        {
+            if (UpsertItemInPouch(itemsPouch, id, 1))
+                added++;
+        }
         UpsertItemInPouch(keyPouch, MegaBracelet, 1);
         UpsertItemInPouch(keyPouch, MegaRing, 1);
         UpsertItemInPouch(keyPouch, KeyStone, 1);
         _sav.Inventory = pouches;
 
         RefreshBagList();
-        BagStatusText.Text = "Added Mega Bracelet (744), Mega Ring (696), Key Stone (773), Charizardite X (660), and Charizardite Y (678). Click Save!";
+        BagStatusText.Text = $"Added {added} Mega Stones + Mega Key Items. Click Save!";
     }
 
     private static bool UpsertItemInPouch(InventoryPouch pouch, int itemId, int count)
@@ -743,7 +943,11 @@ public partial class MainWindow : Window
 
     private static string GetItemName(int item)
     {
+        if (CustomItemNames.TryGetValue(item, out var custom))
+            return custom;
         var names = GameInfo.Strings.Item;
-        return item >= 0 && item < names.Count ? names[item] : $"Item #{item}";
+        return item >= 0 && item < names.Count && !string.IsNullOrWhiteSpace(names[item])
+            ? names[item]
+            : $"Item #{item}";
     }
 }
