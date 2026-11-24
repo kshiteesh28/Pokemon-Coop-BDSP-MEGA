@@ -387,7 +387,14 @@ inline void revertMegaFormInParty() {
             const int monsNo = member->GetMonsNo();
             const uint16_t form = member->GetFormNo();
             if (findMegaByForm(monsNo, form) != nullptr) {
-                member->ChangeFormNo(kBaseForm, nullptr);
+                if (member->IsHpZero()) {
+                    // Never call ChangeFormNo on a fainted Pokemon (it can recalculate/restore HP).
+                    if (member->fields.m_accessor != nullptr) {
+                        member->fields.m_accessor->SetFormNo(kBaseForm);
+                    }
+                } else {
+                    member->ChangeFormNo(kBaseForm, nullptr);
+                }
                 if (member->fields.m_accessor != nullptr) {
                     member->fields.m_accessor->SetTokuseiNo(gPreMegaTokusei);
                 }
@@ -1211,24 +1218,59 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
 
 HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
     static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
-        char customName[16];
-        if (mega::formatCustomMegaAtlasSpriteName(itemId, isLarge, customName, sizeof(customName))) {
+        if (mega::isMegaStone(itemId) || mega::isMegaKeyItem(itemId)) {
+            system_load_typeinfo(0x56c0);
             Dpr::UI::UIManager::getClass()->initIfNeeded();
-            if (auto* uiMgr = Dpr::UI::UIManager::get_Instance(); uiMgr != nullptr) {
-                if (auto* exactSpr = uiMgr->GetAtlasSprite(SpriteAtlasID::TEXTUREMASS, System::String::Create(customName));
-                    exactSpr != nullptr) {
+            auto* uiMgr = Dpr::UI::UIManager::get_Instance();
+            if (uiMgr != nullptr) {
+                auto tryLoad = [&](int32_t iconId, bool large) -> UnityEngine::Sprite::Object* {
+                    if (iconId <= 0 || iconId > 9999) {
+                        return nullptr;
+                    }
+                    char buf[16];
+                    buf[0] = 'i'; buf[1] = 't'; buf[2] = 'e'; buf[3] = 'm'; buf[4] = '_';
+                    buf[5] = static_cast<char>('0' + ((iconId / 1000) % 10));
+                    buf[6] = static_cast<char>('0' + ((iconId / 100) % 10));
+                    buf[7] = static_cast<char>('0' + ((iconId / 10) % 10));
+                    buf[8] = static_cast<char>('0' + (iconId % 10));
+                    if (large) {
+                        buf[9] = '_'; buf[10] = 'L'; buf[11] = '\0';
+                    } else {
+                        buf[9] = '\0';
+                    }
+                    return uiMgr->GetAtlasSprite(SpriteAtlasID::TEXTUREMASS, System::String::Create(buf));
+                };
+
+                UnityEngine::Sprite::Object* spr = nullptr;
+                // 1) Try native/custom item sprite (large first if requested, then standard)
+                if (isLarge) spr = tryLoad(itemId, true);
+                if (spr == nullptr) spr = tryLoad(itemId, false);
+
+                // 2) Try type-matched evolution stone / keystone fallback (by resolved ICONID, then raw ID)
+                if (spr == nullptr) {
+                    int32_t fallbackItem = mega::kOddKeystone;
+                    if (const auto* stone = mega::findMegaStoneCatalog(itemId); stone != nullptr) {
+                        fallbackItem = stone->fallbackIconId;
+                    }
+                    int32_t fbIcon = Pml::Item::ItemData::GetParam(
+                        static_cast<uint16_t>(fallbackItem), Pml::Item::ItemData::PrmID::ICONID);
+                    if (fbIcon <= 0) fbIcon = fallbackItem;
+                    if (isLarge) spr = tryLoad(fbIcon, true);
+                    if (spr == nullptr) spr = tryLoad(fbIcon, false);
+                    if (spr == nullptr && fbIcon != fallbackItem) spr = tryLoad(fallbackItem, false);
+                }
+
+                // 3) Guaranteed-present Fire Stone sprite fallback
+                if (spr == nullptr && isLarge) spr = tryLoad(mega::kFireStone, true);
+                if (spr == nullptr) spr = tryLoad(mega::kFireStone, false);
+
+                if (spr != nullptr) {
                     if (onLoadedCallback != nullptr) {
-                        onLoadedCallback->Invoke(reinterpret_cast<Il2CppObject*>(exactSpr));
+                        onLoadedCallback->Invoke(reinterpret_cast<Il2CppObject*>(spr));
                     }
                     return;
                 }
             }
-            int32_t fallbackId = mega::kOddKeystone;
-            if (const auto* stone = mega::findMegaStoneCatalog(itemId); stone != nullptr) {
-                fallbackId = stone->fallbackIconId;
-            }
-            Orig(fallbackId, onLoadedCallback, isUnload, isLarge);
-            return;
         }
         Orig(itemId, onLoadedCallback, isUnload, isLarge);
     }
@@ -1388,19 +1430,9 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
             FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, true);
             return;
         }
+        // Never mutate m_formNo or call ChangeFormNo mid-battle when fainting — let BDSP finish
+        // fainting/switching cleanly, and revert Mega form safely once the battle ends.
         Orig(__this, pokeAction);
-        if (mega::gActiveMegaForm > 0 && mega::gMegaBattlePokeID != 0xFF && __this != nullptr) {
-            auto* sec = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(__this);
-            if (auto* megaBpp = sec->GetPokeParam(mega::gMegaBattlePokeID); megaBpp != nullptr && megaBpp->IsDead()) {
-                megaBpp->fields.m_formNo = mega::kBaseForm;
-                megaBpp->fields.m_tokusei = mega::gPreMegaTokusei;
-                if (megaBpp->fields.m_coreParam != nullptr) {
-                    megaBpp->fields.m_coreParam->fields.formno = mega::kBaseForm;
-                    megaBpp->fields.m_coreParam->fields.defaultTokusei = mega::gPreMegaTokusei;
-                }
-                mega::revertMegaFormInParty();
-            }
-        }
     }
 };
 
