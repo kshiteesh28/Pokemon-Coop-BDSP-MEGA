@@ -127,15 +127,15 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 150, 2, 663,  0, 106, 150,  70, 194, 120, 140, kInsomnia,     kTypePsychic,  kTypePsychic,   330, "pm0150_52_00", "pm0150_52_10", true,  "Mewtwo",      "Mega Mewtwo Y",    "Mewtwonite Y" },
 
     // ======================== JOHTO (9) =========================
-    { 154, 1, 848,  0,  80,  92, 115, 143, 115,  80, kGrassySurge,  kTypeGrass,    kTypeFairy,    2010, "pm0154_51_00", "pm0154_51_10", false, "Meganium",    "Mega Meganium",    "Meganiumite" },
-    { 160, 1, 859,  0,  85, 160, 125,  89,  93,  78, kStrongJaw,    kTypeWater,    kTypeDragon,   1088, "pm0160_51_00", "pm0160_51_10", false, "Feraligatr",  "Mega Feraligatr",  "Feraligite" },
+    { 154, 1, 848,  0,  80,  92, 115, 143, 115,  80, kGrassySurge,  kTypeGrass,    kTypeFairy,    2010, "pm0154_51_00", "pm0154_51_10", true,  "Meganium",    "Mega Meganium",    "Meganiumite" },
+    { 160, 1, 859,  0,  85, 160, 125,  89,  93,  78, kStrongJaw,    kTypeWater,    kTypeDragon,   1088, "pm0160_51_00", "pm0160_51_10", true,  "Feraligatr",  "Mega Feraligatr",  "Feraligite" },
     { 181, 1, 658,  0,  90,  95, 105, 165, 110,  45, kMoldBreaker,  kTypeElectric, kTypeDragon,    615, "pm0181_51_00", "pm0181_51_10", false, "Ampharos",    "Mega Ampharos",    "Ampharosite" },
-    { 208, 1, 761,  0,  75, 125, 230,  55,  95,  30, kSandForce,    kTypeSteel,    kTypeGround,   7400, "pm0208_51_00", "pm0208_51_10", false, "Steelix",     "Mega Steelix",     "Steelixite" },
-    { 212, 1, 670,  0,  70, 150, 140,  65, 100,  75, kTechnician,   kTypeBug,      kTypeSteel,    1250, "pm0212_51_00", "pm0212_51_10", false, "Scizor",      "Mega Scizor",      "Scizorite" },
+    { 208, 1, 761,  0,  75, 125, 230,  55,  95,  30, kSandForce,    kTypeSteel,    kTypeGround,   7400, "pm0208_51_00", "pm0208_51_10", true,  "Steelix",     "Mega Steelix",     "Steelixite" },
+    { 212, 1, 670,  0,  70, 150, 140,  65, 100,  75, kTechnician,   kTypeBug,      kTypeSteel,    1250, "pm0212_51_00", "pm0212_51_10", true,  "Scizor",      "Mega Scizor",      "Scizorite" },
     { 214, 1, 680,  0,  80, 185, 115,  40, 105,  75, kSkillLink,    kTypeBug,      kTypeFighting,  625, "pm0214_51_00", "pm0214_51_10", false, "Heracross",   "Mega Heracross",   "Heracronite" },
-    { 227, 1, 867,  0,  65, 140, 110,  40, 100, 110, kSharpness,    kTypeSteel,    kTypeFlying,    404, "pm0227_51_00", "pm0227_51_10", false, "Skarmory",    "Mega Skarmory",    "Skarmorite" },
+    { 227, 1, 867,  0,  65, 140, 110,  40, 100, 110, kSharpness,    kTypeSteel,    kTypeFlying,    404, "pm0227_51_00", "pm0227_51_10", true,  "Skarmory",    "Mega Skarmory",    "Skarmorite" },
     { 229, 1, 666,  0,  75,  90,  90, 140,  90, 115, kSolarPower,   kTypeDark,     kTypeFire,      495, "pm0229_51_00", "pm0229_51_10", false, "Houndoom",    "Mega Houndoom",    "Houndoominite" },
-    { 248, 1, 669,  0, 100, 164, 150,  95, 120,  71, kSandStream,   kTypeRock,     kTypeDark,     2550, "pm0248_51_00", "pm0248_51_10", false, "Tyranitar",   "Mega Tyranitar",   "Tyranitarite" },
+    { 248, 1, 669,  0, 100, 164, 150,  95, 120,  71, kSandStream,   kTypeRock,     kTypeDark,     2550, "pm0248_51_00", "pm0248_51_10", true,  "Tyranitar",   "Mega Tyranitar",   "Tyranitarite" },
 
     // ======================== HOENN (22) ========================
     { 254, 1, 753,  0,  70, 110,  75, 145,  85, 145, kLightningRod, kTypeGrass,    kTypeDragon,    552, "pm0254_51_00", "pm0254_51_10", false, "Sceptile",    "Mega Sceptile",    "Sceptilite" },

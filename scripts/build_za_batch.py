@@ -898,6 +898,12 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
     },
     # Mega Kangaskhan: skip closed baby eyelidb overlay
     "pm0115_51_00": {"pm0115_51_00_eyelidb_mesh_shape"},
+    # Mega Feraligatr: keep primary arm_a, skip swappable arm_b & closed eyelid
+    "pm0160_51_00": {"pm0160_51_00_arm_b_mesh_shape", "pm0160_51_00_eyelid_mesh_shape"},
+    # Mega Steelix: skip closed eyelid overlay
+    "pm0208_51_00": {"pm0208_51_00_eyelid_mesh_shape"},
+    # Mega Skarmory: keep primary hair_a crest, skip swappable hair_b duplicate
+    "pm0227_51_00": {"pm0227_51_00_hair_b_mesh_shape"},
 }
 
 
