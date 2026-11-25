@@ -1058,7 +1058,8 @@ inline void equipTrainerMegaStonesForClient(Dpr::Battle::Logic::BTL_PARTY::Objec
 
     if (bestBpp != nullptr && bestEntry != nullptr && bestEntry->stoneItemId != 0 && !bestAlreadyHasStone) {
         bestBpp->fields.m_coreParam->fields.item = bestEntry->stoneItemId;
-        if (auto* srcPoke = bestBpp->GetSrcData(); srcPoke != nullptr && !srcPoke->IsNull()) {
+        if (auto* srcPoke = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(bestBpp->GetSrcData());
+            srcPoke != nullptr && !srcPoke->IsNull()) {
             srcPoke->SetItem(bestEntry->stoneItemId);
         }
     }
@@ -1240,7 +1241,7 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
     }
-    if (auto* srcPoke = param->GetSrcData();
+    if (auto* srcPoke = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(param->GetSrcData());
         srcPoke != nullptr && !srcPoke->IsNull() && srcPoke->fields.m_accessor != nullptr) {
         srcPoke->fields.m_accessor->SetTokuseiNo(megaAbility);
     }
