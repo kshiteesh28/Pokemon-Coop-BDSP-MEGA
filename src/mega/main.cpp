@@ -59,6 +59,7 @@
 
 #include "mega_registry.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -304,8 +305,8 @@ static_assert(resolveMegaForm(359, 0, kAbsoliteZ, true, true) == -1);
 static_assert(kAbsolite == 677 && kAbsoliteZ == 622);
 static_assert(kMagicBounce == 156 && kSharpness == 292);
 
-bool gPostInitHooksInstalled = false;
-bool gItemTablePatched = false;
+std::atomic<bool> gPostInitHooksInstalled{false};
+std::atomic<bool> gItemTablePatched{false};
 bool gMegaBattleAllowed = true;
 bool gMegaUsedThisBattle = false;
 bool gMegaArmed = false;
@@ -316,7 +317,9 @@ uint16_t gPreMegaTokusei = 0;
 uint8_t gMegaBattlePokeID = 0xFF;
 
 inline bool isBattleEnded() {
-    Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
+    if (auto* cls = Dpr::Battle::View::BattleViewCore::getClass(); cls != nullptr) {
+        cls->initIfNeeded();
+    }
     return Dpr::Battle::View::BattleViewCore::get_Instance() == nullptr;
 }
 
@@ -346,7 +349,7 @@ inline void revertMegaFormInParty() {
                 } else {
                     member->ChangeFormNo(kBaseForm, nullptr);
                 }
-                if (gPreMegaTokusei > 0 && member->fields.m_accessor != nullptr) {
+                if (monsNo == gActiveMegaSpecies && gPreMegaTokusei > 0 && member->fields.m_accessor != nullptr) {
                     member->fields.m_accessor->SetTokuseiNo(gPreMegaTokusei);
                 }
             }
@@ -586,7 +589,7 @@ inline bool hasMegaAccessoryInBag() {
 
 // Patch all 92 Mega Stone rows & 3 Mega Key Item rows in the loaded master ItemTable once.
 inline void patchItemTableInMemory() {
-    if (gItemTablePatched) {
+    if (gItemTablePatched.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -655,7 +658,7 @@ inline void patchItemTableInMemory() {
     applyTemplate(items->m_Items[kMegaRing], magmaStone, oddKeystone);
     applyTemplate(items->m_Items[kKeyStone], magmaStone, oddKeystone);
 
-    gItemTablePatched = true;
+    gItemTablePatched.store(true, std::memory_order_release);
 }
 
 inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) {
@@ -890,7 +893,8 @@ inline const MegaSpeciesEntry* targetMegaEntry(Dpr::Battle::Logic::BTL_POKEPARAM
     return matchMegaCandidate(pokeParam);
 }
 
-inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList) {
+inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* wazaList,
+                                   bool forceRefresh = false) {
     if (wazaList == nullptr || wazaList->fields._btlPokeParam == nullptr) {
         return;
     }
@@ -900,6 +904,22 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     const bool hasRing = hasMegaAccessoryInBag();
     const auto* entry = targetMegaEntry(bpp);
     const bool eligible = entry != nullptr;
+
+    // Avoid 60 FPS IL2CPP System::String allocations & TextMeshPro mesh rebuilds when UI state is unchanged.
+    static const void* sLastWazaList = nullptr;
+    static const MegaSpeciesEntry* sLastEntry = nullptr;
+    static int sLastBannerState = -1;
+    const int bannerState = (eligible ? 1 : 0) |
+                            (gMegaArmed ? 2 : 0) |
+                            (gMegaUsedThisBattle ? 4 : 0) |
+                            (hasRing ? 8 : 0) |
+                            (candidate != nullptr ? 16 : 0);
+    if (!forceRefresh && sLastWazaList == wazaList && sLastEntry == entry && sLastBannerState == bannerState) {
+        return;
+    }
+    sLastWazaList = wazaList;
+    sLastEntry = entry;
+    sLastBannerState = bannerState;
 
     if (wazaList->fields._yButtonText != nullptr) {
         auto* promptText = reinterpret_cast<Dpr::UI::UIText::Object*>(wazaList->fields._yButtonText);
@@ -982,32 +1002,40 @@ void executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     const uint16_t accessoryId = ownedMegaAccessoryInBag();
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
 
-    auto* msgDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
-    msgDesc->fields.pokeID = param->GetID();
-    msgDesc->fields.isDisplayTokuseiWindow = false;
-    msgDesc->fields.message->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvoStart);
-    msgDesc->fields.message->AddArg(param->GetID());
-    msgDesc->fields.message->AddArg(pokeAction->fields.clientID);
-    msgDesc->fields.message->AddArg(param->GetItem());
-    msgDesc->fields.message->AddArg(displayAccessory);
+    if (container->fields.m_section_FromEvent_Message != nullptr) {
+        if (auto* msgDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
+            msgDesc != nullptr && msgDesc->fields.message != nullptr) {
+            msgDesc->fields.pokeID = param->GetID();
+            msgDesc->fields.isDisplayTokuseiWindow = false;
+            msgDesc->fields.message->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvoStart);
+            msgDesc->fields.message->AddArg(param->GetID());
+            msgDesc->fields.message->AddArg(pokeAction->fields.clientID);
+            msgDesc->fields.message->AddArg(param->GetItem());
+            msgDesc->fields.message->AddArg(displayAccessory);
 
-    auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
-    container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
+            auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
+            container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
+        }
+    }
 
-    auto* formDesc = Dpr::Battle::Logic::Section_FromEvent_FormChange::Description::newInstance();
-    formDesc->fields.pokeID = param->GetID();
-    formDesc->fields.formNo = static_cast<uint8_t>(entry->form);
-    formDesc->fields.isDontResetFormByOut = true;
-    formDesc->fields.isEnableInCaseOfDead = false;
-    formDesc->fields.isDisplayTokuseiWindow = false;
-    formDesc->fields.isDisplayChangeEffect = true;
-    formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
-    formDesc->fields.successMessage->AddArg(param->GetID());
-    formDesc->fields.successMessage->AddArg(param->GetID());
+    if (container->fields.m_section_FromEvent_FormChange != nullptr) {
+        if (auto* formDesc = Dpr::Battle::Logic::Section_FromEvent_FormChange::Description::newInstance();
+            formDesc != nullptr && formDesc->fields.successMessage != nullptr) {
+            formDesc->fields.pokeID = param->GetID();
+            formDesc->fields.formNo = static_cast<uint8_t>(entry->form);
+            formDesc->fields.isDontResetFormByOut = true;
+            formDesc->fields.isEnableInCaseOfDead = false;
+            formDesc->fields.isDisplayTokuseiWindow = false;
+            formDesc->fields.isDisplayChangeEffect = true;
+            formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
+            formDesc->fields.successMessage->AddArg(param->GetID());
+            formDesc->fields.successMessage->AddArg(param->GetID());
 
-    system_load_typeinfo(0x2c56);
-    auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
-    container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
+            system_load_typeinfo(0x2c56);
+            auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
+            container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
+        }
+    }
 
     const uint16_t megaAbility = static_cast<uint16_t>(entry->ability);
     param->fields.m_tokusei = megaAbility;
@@ -1044,11 +1072,11 @@ void executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
 } // namespace mega
 
 HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
-    static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID) {
-        if (!mega::gPostInitHooksInstalled) {
+    static int32_t Callback(uint16_t itemno, Pml::Item::ItemData::PrmID prmID, const void* methodInfo) {
+        if (!mega::gPostInitHooksInstalled.load(std::memory_order_acquire)) {
             mega::installSharedPostInitHooks();
         }
-        if (!mega::gItemTablePatched) {
+        if (!mega::gItemTablePatched.load(std::memory_order_acquire)) {
             mega::patchItemTableInMemory();
         }
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
@@ -1062,25 +1090,26 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         if (prmID == Pml::Item::ItemData::PrmID::ICONID) {
             if (stone != nullptr) {
                 if (mega::isNativeGen6MegaStone(itemno)) {
-                    const int32_t nativeIcon = Orig(itemno, prmID);
+                    const int32_t nativeIcon = Orig(itemno, prmID, methodInfo);
                     if (nativeIcon > 0) {
                         return nativeIcon;
                     }
                 }
-                return Orig(stone->fallbackIconId, prmID);
+                return Orig(stone->fallbackIconId, prmID, methodInfo);
             }
             if (isKey) {
-                const int32_t nativeIcon = Orig(itemno, prmID);
-                return (nativeIcon > 0) ? nativeIcon : Orig(mega::kOddKeystone, prmID);
+                const int32_t nativeIcon = Orig(itemno, prmID, methodInfo);
+                return (nativeIcon > 0) ? nativeIcon : Orig(mega::kOddKeystone, prmID, methodInfo);
             }
         }
-        return Orig(itemno, prmID);
+        return Orig(itemno, prmID, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
     static int32_t Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this,
-                            Dpr::Battle::Logic::BTL_POKEPARAM::ValueID vid) {
+                            Dpr::Battle::Logic::BTL_POKEPARAM::ValueID vid,
+                            const void* methodInfo) {
         if (!mega::gInMegaTokuseiSwap && __this != nullptr &&
             (vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI ||
              vid == Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_TOKUSEI_EFFECTIVE)) {
@@ -1088,12 +1117,12 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetValue) {
                 return entry->ability;
             }
         }
-        return Orig(__this, vid);
+        return Orig(__this, vid, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
-    static uint16_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+    static uint16_t Callback(Pml::PokePara::CoreParam::Object* __this, const void* methodInfo) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
@@ -1102,23 +1131,17 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
                 return static_cast<uint16_t>(entry->ability);
             }
         }
-        return Orig(__this);
+        return Orig(__this, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
-    static XLSXContent::PersonalTable::SheetPersonal::Object* Callback(int32_t monsno, uint16_t formno) {
-        if (mega::isSupportedMegaSpecies(monsno)) {
-            auto* base = Orig(monsno, mega::kBaseForm);
-            if (base != nullptr) {
-                if (formno == mega::kBaseForm) {
-                    if (monsno == mega::kCharizardSpecies) {
-                        base->fields.type1 = mega::kTypeFire;
-                        base->fields.type2 = mega::kTypeFlying;
-                    }
-                    return base;
-                }
-                if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr && base->klass != nullptr) {
+    static XLSXContent::PersonalTable::SheetPersonal::Object* Callback(
+        int32_t monsno, uint16_t formno, const void* methodInfo) {
+        if (formno != mega::kBaseForm) {
+            if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr) {
+                auto* base = Orig(monsno, mega::kBaseForm, methodInfo);
+                if (base != nullptr && base->klass != nullptr) {
                     auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
                         il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
                     if (clone != nullptr) {
@@ -1142,18 +1165,29 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
                 }
             }
         }
-        return Orig(monsno, formno);
+        return Orig(monsno, formno, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
-    static void Callback(int32_t monsno, uint16_t formno) {
-        Orig(monsno, formno);
-        if (mega::isSupportedMegaSpecies(monsno)) {
-            if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
-                pClass != nullptr && pClass->static_fields != nullptr) {
-                if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno); patched != nullptr) {
-                    pClass->static_fields->s_PersonalData = patched;
+    static void Callback(int32_t monsno, uint16_t formno, const void* methodInfo) {
+        Orig(monsno, formno, methodInfo);
+        if (formno != mega::kBaseForm) {
+            if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr) {
+                if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
+                    pClass != nullptr && pClass->static_fields != nullptr) {
+                    auto* cur = pClass->static_fields->s_PersonalData;
+                    const bool alreadyPatched = cur != nullptr &&
+                                                cur->fields.basic_atk == static_cast<uint8_t>(md->attack) &&
+                                                cur->fields.basic_agi == static_cast<uint8_t>(md->speed) &&
+                                                cur->fields.type1 == md->primaryType &&
+                                                cur->fields.type2 == md->secondaryType;
+                    if (!alreadyPatched) {
+                        if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno);
+                            patched != nullptr) {
+                            pClass->static_fields->s_PersonalData = patched;
+                        }
+                    }
                 }
             }
         }
@@ -1161,16 +1195,14 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
 };
 
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
-    static Dpr::Battle::Logic::PokeTypePair::Object Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this) {
-        auto origPair = Orig(__this);
+    static Dpr::Battle::Logic::PokeTypePair::Object Callback(
+        Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, const void* methodInfo) {
+        auto origPair = Orig(__this, methodInfo);
         if (__this != nullptr) {
             const int monsNo = __this->GetMonsNo();
             const uint8_t form = __this->GetFormNo();
             if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
                 return mega::makeDualTypePair(origPair, md->primaryType, md->secondaryType);
-            }
-            if (monsNo == mega::kCharizardSpecies) {
-                return mega::makeDualTypePair(origPair, mega::kTypeFire, mega::kTypeFlying);
             }
         }
         return origPair;
@@ -1178,7 +1210,7 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
 };
 
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$IsMatchType) {
-    static bool Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, uint8_t type) {
+    static bool Callback(Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, uint8_t type, const void* methodInfo) {
         if (__this != nullptr) {
             const int monsNo = __this->GetMonsNo();
             const uint8_t form = __this->GetFormNo();
@@ -1187,64 +1219,45 @@ HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$IsMatchType) {
                 Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
                 return type == md->primaryType || type == md->secondaryType || (tEx < 18 && type == tEx);
             }
-            if (monsNo == mega::kCharizardSpecies) {
-                uint8_t t1 = 0, t2 = 0, tEx = 0;
-                Dpr::Battle::Logic::PokeTypePair::Split(__this->GetPokeType(), &t1, &t2, &tEx);
-                return type == mega::kTypeFire || type == mega::kTypeFlying || (tEx < 18 && type == tEx);
-            }
         }
-        return Orig(__this, type);
+        return Orig(__this, type, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType1) {
-    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this, const void* methodInfo) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr) {
-            const int monsNo = __this->GetMonsNo();
-            const uint16_t form = __this->GetFormNo();
-            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
-                if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
-                    return md->primaryType;
-                }
-            }
-            if (monsNo == mega::kCharizardSpecies) {
-                return mega::kTypeFire;
+        if (__this != nullptr && mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
+            if (const auto* md = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); md != nullptr) {
+                return md->primaryType;
             }
         }
-        return Orig(__this);
+        return Orig(__this, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
-    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this) {
+    static uint8_t Callback(Pml::PokePara::CoreParam::Object* __this, const void* methodInfo) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr) {
-            const int monsNo = __this->GetMonsNo();
-            const uint16_t form = __this->GetFormNo();
-            if (mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
-                if (const auto* md = mega::findMegaByForm(monsNo, form); md != nullptr) {
-                    return md->secondaryType;
-                }
-            }
-            if (monsNo == mega::kCharizardSpecies) {
-                return mega::kTypeFlying;
+        if (__this != nullptr && mega::gActiveMegaForm > 0 && !mega::isBattleEnded()) {
+            if (const auto* md = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); md != nullptr) {
+                return md->secondaryType;
             }
         }
-        return Orig(__this);
+        return Orig(__this, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(CheckUnbreakablePokeItem) {
-    static bool Callback(uint16_t monsno, uint16_t itemID) {
+    static bool Callback(uint16_t monsno, uint16_t itemID, const void* methodInfo) {
         if (itemID != 0 && mega::findMegaByStone(monsno, mega::kBaseForm, itemID) != nullptr) {
             return true;
         }
-        return Orig(monsno, itemID);
+        return Orig(monsno, itemID, methodInfo);
     }
 };
 
@@ -1319,7 +1332,8 @@ HOOK_DEFINE_TRAMPOLINE(AssetManager$$UnloadAssetBundle) {
 HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
-                                            System::String::Object* label) {
+                                            System::String::Object* label,
+                                            const void* methodInfo) {
         if (mega::gActiveMegaForm > 0 && label != nullptr) {
             if (const auto* md = mega::findMegaByForm(mega::gActiveMegaSpecies, mega::gActiveMegaForm); md != nullptr) {
                 char msgBuf[192];
@@ -1342,26 +1356,28 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
         if (const char* custom = mega::lookupMegaItemTextByLabel(fileName, label); custom != nullptr) {
             return System::String::Create(custom);
         }
-        return Orig(__this, fileName, label);
+        return Orig(__this, fileName, label, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetNameMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
-                                            System::String::Object* label) {
+                                            System::String::Object* label,
+                                            const void* methodInfo) {
         if (const char* custom = mega::lookupMegaItemTextByLabel(fileName, label); custom != nullptr) {
             return System::String::Create(custom);
         }
-        return Orig(__this, fileName, label);
+        return Orig(__this, fileName, label, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Index) {
     static void Callback(Dpr::UI::UIText::Object* __this,
                          System::String::Object* messageFile,
-                         int32_t messageIndex) {
-        Orig(__this, messageFile, messageIndex);
+                         int32_t messageIndex,
+                         const void* methodInfo) {
+        Orig(__this, messageFile, messageIndex, methodInfo);
         if (__this == nullptr || messageFile == nullptr || messageIndex <= 0) {
             return;
         }
@@ -1379,8 +1395,9 @@ HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Index) {
 HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Label) {
     static void Callback(Dpr::UI::UIText::Object* __this,
                          System::String::Object* messageFile,
-                         System::String::Object* messageId) {
-        Orig(__this, messageFile, messageId);
+                         System::String::Object* messageId,
+                         const void* methodInfo) {
+        Orig(__this, messageFile, messageId, methodInfo);
         if (__this == nullptr || messageId == nullptr) {
             return;
         }
@@ -1394,31 +1411,34 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this,
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
                          uint8_t pokeIndex,
-                         Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest) {
+                         Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest,
+                         const void* methodInfo) {
         const bool eligible = mega::targetMegaEntry(bpp) != nullptr;
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
 
-        Orig(__this, bpp, pokeIndex, dest);
+        Orig(__this, bpp, pokeIndex, dest, methodInfo);
 
         mega::gMegaArmed = false;
-        mega::updateMegaBattleBanner(__this);
+        mega::updateMegaBattleBanner(__this, true);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnShow) {
-    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
-        const bool eligible = mega::targetMegaEntry(__this->fields._btlPokeParam) != nullptr;
-        FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, const void* methodInfo) {
+        if (__this != nullptr) {
+            const bool eligible = mega::targetMegaEntry(__this->fields._btlPokeParam) != nullptr;
+            FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
+        }
 
-        Orig(__this);
+        Orig(__this, methodInfo);
 
         mega::gMegaArmed = false;
-        mega::updateMegaBattleBanner(__this);
+        mega::updateMegaBattleBanner(__this, true);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
-    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime) {
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, float deltaTime, const void* methodInfo) {
         if (__this != nullptr &&
             __this->fields._IsShow_k__BackingField &&
             __this->fields._IsFocus_k__BackingField &&
@@ -1441,17 +1461,17 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
             }
         }
 
-        Orig(__this, deltaTime);
+        Orig(__this, deltaTime, methodInfo);
 
         if (__this != nullptr && __this->fields._IsShow_k__BackingField) {
-            mega::updateMegaBattleBanner(__this);
+            mega::updateMegaBattleBanner(__this, false);
         }
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
-    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this) {
-        Orig(__this);
+    static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this, const void* methodInfo) {
+        Orig(__this, methodInfo);
         if (__this == nullptr) {
             return;
         }
@@ -1469,8 +1489,9 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnSubmit) {
 
 HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
     static void Callback(Dpr::Battle::Logic::Section_ProcessActionCore::Object* __this,
-                         Dpr::Battle::Logic::PokeAction::Object* pokeAction) {
-        if (pokeAction != nullptr &&
+                         Dpr::Battle::Logic::PokeAction::Object* pokeAction,
+                         const void* methodInfo) {
+        if (__this != nullptr && pokeAction != nullptr &&
             pokeAction->fields.actionCategory == Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution) {
             auto* container = reinterpret_cast<Dpr::Battle::Logic::SectionContainer::Object*>(
                 __this->fields.m_pSectionContainer);
@@ -1481,7 +1502,7 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
         }
         // Never mutate m_formNo or call ChangeFormNo mid-battle when fainting — let BDSP finish
         // fainting/switching cleanly, and revert Mega form safely once the battle ends.
-        Orig(__this, pokeAction);
+        Orig(__this, pokeAction, methodInfo);
     }
 };
 
@@ -1489,9 +1510,15 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
     static void Callback(Dpr::Battle::Logic::Section_StoreActions::Object* __this,
                          Dpr::Battle::Logic::PokeActionContainer::Object* actionContainer,
                          Dpr::Battle::Logic::SVCL_ACTION::Object* instructions,
-                         uint8_t clientID) {
+                         uint8_t clientID,
+                         const void* methodInfo) {
         system_load_typeinfo(0x78dd);
         system_load_typeinfo(0x78c7);
+
+        if (__this == nullptr || actionContainer == nullptr || instructions == nullptr) {
+            Orig(__this, actionContainer, instructions, clientID, methodInfo);
+            return;
+        }
 
         auto* party = reinterpret_cast<Dpr::Battle::Logic::Section::Object*>(__this)->GetPokeParty(clientID);
         const uint8_t numAction = Dpr::Battle::Logic::SVCL_ACTION::GetNumAction(instructions, clientID);
@@ -1506,7 +1533,7 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
         }
 
         if (!anyMega) {
-            Orig(__this, actionContainer, instructions, clientID);
+            Orig(__this, actionContainer, instructions, clientID, methodInfo);
             return;
         }
 
@@ -1540,7 +1567,11 @@ HOOK_DEFINE_TRAMPOLINE(setupPokeAction_FromClientInstruction) {
     static bool Callback(Dpr::Battle::Logic::Section_StoreActions::Object* __this,
                          Dpr::Battle::Logic::PokeAction::Object* pokeAction,
                          Dpr::Battle::Logic::BTL_ACTION_PARAM::Object* clientInstruction,
-                         uint8_t clientID) {
+                         uint8_t clientID,
+                         const void* methodInfo) {
+        if (__this == nullptr || pokeAction == nullptr || clientInstruction == nullptr) {
+            return Orig(__this, pokeAction, clientInstruction, clientID, methodInfo);
+        }
         Dpr::Battle::Logic::BTL_ACTION_PARAM::Object instruction{};
         instruction.fields.raw = clientInstruction->fields.raw;
 
@@ -1554,30 +1585,35 @@ HOOK_DEFINE_TRAMPOLINE(setupPokeAction_FromClientInstruction) {
             pokeAction->fields.fRecalcPriority = false;
 
             auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(__this->fields.m_pBattleEnv);
-            battleEnv->fields.m_actionSerialNoManager->AssignSerialNo(pokeAction->fields.actionDesc);
+            if (battleEnv != nullptr && battleEnv->fields.m_actionSerialNoManager != nullptr) {
+                battleEnv->fields.m_actionSerialNoManager->AssignSerialNo(pokeAction->fields.actionDesc);
+            }
             return true;
         }
 
-        return Orig(__this, pokeAction, clientInstruction, clientID);
+        return Orig(__this, pokeAction, clientInstruction, clientID, methodInfo);
     }
 };
 
 HOOK_DEFINE_TRAMPOLINE(CalcActionPriority$$Execute) {
     static void Callback(Dpr::Battle::Logic::Section_CalcActionPriority::Object* __this,
                          Dpr::Battle::Logic::Section_CalcActionPriority::Result::Object* pResult,
-                         Dpr::Battle::Logic::Section_CalcActionPriority::Description::Object** description) {
-        auto* pokeAction = (*description)->fields.pokeAction;
-        if (pokeAction != nullptr &&
-            pokeAction->fields.actionCategory == Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution) {
-            constexpr uint8_t operationPri = 2;
-            constexpr uint8_t dominantPri = 2;
-            constexpr uint8_t wazaPri = 0;
-            constexpr uint8_t agility = 0;
-            const auto spPri = static_cast<uint8_t>((*description)->fields.specialPriority);
-            pResult->fields.priority = Dpr::Battle::Logic::ActPri::Make(dominantPri, operationPri, wazaPri, spPri, agility);
-            return;
+                         Dpr::Battle::Logic::Section_CalcActionPriority::Description::Object** description,
+                         const void* methodInfo) {
+        if (pResult != nullptr && description != nullptr && *description != nullptr) {
+            auto* pokeAction = (*description)->fields.pokeAction;
+            if (pokeAction != nullptr &&
+                pokeAction->fields.actionCategory == Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution) {
+                constexpr uint8_t operationPri = 2;
+                constexpr uint8_t dominantPri = 2;
+                constexpr uint8_t wazaPri = 0;
+                constexpr uint8_t agility = 0;
+                const auto spPri = static_cast<uint8_t>((*description)->fields.specialPriority);
+                pResult->fields.priority = Dpr::Battle::Logic::ActPri::Make(dominantPri, operationPri, wazaPri, spPri, agility);
+                return;
+            }
         }
-        Orig(__this, pResult, description);
+        Orig(__this, pResult, description, methodInfo);
     }
 };
 
@@ -1589,7 +1625,9 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                          bool isCantUseBall) {
         mega::revertMegaFormInParty();
         mega::gMegaUsedThisBattle = false;
-        mega::gMegaBattleAllowed = !(isCaptureDemo || battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
+        const bool isSafari = (battleSetupParam != nullptr &&
+                               battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
+        mega::gMegaBattleAllowed = !(isCaptureDemo || isSafari);
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, iPtrEnemyParty, arenaID, mapAttrib, weatherType, isSwim, isFishing, partnerID,
              isCaptureDemo, safariBallNum, isSymbol, isMitu, overlapBgm, overlapSetupEffectId, isCantUseBall);
@@ -1611,11 +1649,11 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
 
 namespace mega {
 void installSharedPostInitHooks() {
-    if (gPostInitHooksInstalled) {
+    if (gPostInitHooksInstalled.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
-    gPostInitHooksInstalled = true;
 
+    // Shared hooks installed after Luminescent Platinum subsdk1 initializes.
     BTL_POKEPARAM$$GetValue::InstallAtOffset(0x01fdd010);
     BTL_POKEPARAM$$GetPokeType::InstallAtOffset(0x01fdfa80);
     BTL_POKEPARAM$$IsMatchType::InstallAtOffset(0x01fdfad0);
@@ -1624,25 +1662,23 @@ void installSharedPostInitHooks() {
     CoreParam$$GetType2::InstallAtOffset(0x0204aaf0);
     PersonalSystem$$GetPersonalData::InstallAtOffset(0x024a0ca0);
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
-    CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
-    UIManager$$GetPokemonIconData::InstallAtOffset(0x017c1250);
-    AssetManager$$AppendAssetBundleRequest::InstallAtOffset(0x022dbfb0);
-    AssetManager$$UnloadAssetBundle::InstallAtOffset(0x022dbde0);
-    // Note: Do NOT hook 0x01ca7100 (ItemIcon::LoadSprite) here — Luminescent Platinum subsdk1
-    // already installs HOOK_DEFINE_REPLACE(ItemIconOverride) at 0x01ca7100, which reads
-    // ItemData::GetParam(itemId, ICONID) cleanly through our ItemData$$GetParam hook.
-    MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
-    MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
-    UIText$$SetupMessage_Label::InstallAtOffset(0x01dd18d0);
-    UIText$$SetupMessage_Index::InstallAtOffset(0x01dd1940);
 }
 } // namespace mega
 
 extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
 
+    // Non-colliding hooks installed single-threaded before nnMain (zero thread-safety race risk).
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
+    CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
+    UIManager$$GetPokemonIconData::InstallAtOffset(0x017c1250);
+    AssetManager$$AppendAssetBundleRequest::InstallAtOffset(0x022dbfb0);
+    AssetManager$$UnloadAssetBundle::InstallAtOffset(0x022dbde0);
+    MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
+    MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
+    UIText$$SetupMessage_Label::InstallAtOffset(0x01dd18d0);
+    UIText$$SetupMessage_Index::InstallAtOffset(0x01dd1940);
     BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
     BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
     BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
