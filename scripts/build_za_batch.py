@@ -390,7 +390,8 @@ def composite_za_mat_with_mirror(
     uv_so = mat_info["cols"].get("UVScaleOffset", (1.0, 1.0, 0.0))
     if uv_so[0] > 1.5:
         half = composite_material_srgb(mat_info, bntx_idx, tmp_dir, tile_w // 2, tile_h, is_eye=is_eye)
-        return np.concatenate([half, half[:, ::-1, :]], axis=1)
+        mirrored = np.concatenate([half, half[:, ::-1, :]], axis=1)
+        return resize_rgba(mirrored, tile_h, tile_w)
     return composite_material_srgb(mat_info, bntx_idx, tmp_dir, tile_w, tile_h, is_eye=is_eye)
 
 
@@ -904,6 +905,8 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
     "pm0208_51_00": {"pm0208_51_00_eyelid_mesh_shape"},
     # Mega Skarmory: keep primary hair_a crest, skip swappable hair_b duplicate
     "pm0227_51_00": {"pm0227_51_00_hair_b_mesh_shape"},
+    # Mega Sharpedo: keep primary eye_a, skip swappable eye_b duplicate
+    "pm0319_51_00": {"pm0319_51_00_eye_b_mesh_shape"},
 }
 
 
