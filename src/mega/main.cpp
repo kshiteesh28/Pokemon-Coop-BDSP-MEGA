@@ -314,6 +314,7 @@ std::atomic<bool> gItemTablePatched{false};
 bool gIsTrainerBattle = false;
 bool gMegaBattleAllowed = true;
 bool gClientMegaUsed[kMaxBattleClients] = {false, false, false, false};
+bool gTrainerStonesEquipped[kMaxBattleClients] = {false, false, false, false};
 bool gMegaArmed = false;
 bool gAnyMegaActiveInBattle = false;
 
@@ -332,9 +333,19 @@ uint8_t gCurrentEvoClientID = 0;
 
 bool gInMegaTokuseiSwap = false;
 
+inline bool isKnownPreMegaTokusei(uint16_t tok) {
+    if (tok == 0) return false;
+    if (gPlayerPreMegaTokusei == tok) return true;
+    for (uint8_t i = 0; i < kMaxBattlePokes; ++i) {
+        if (gPreMegaTokuseiByPokeID[i] == tok) return true;
+    }
+    return false;
+}
+
 inline void resetBattleMegaState() {
     for (uint8_t i = 0; i < kMaxBattleClients; ++i) {
         gClientMegaUsed[i] = false;
+        gTrainerStonesEquipped[i] = false;
     }
     for (uint8_t i = 0; i < kMaxBattlePokes; ++i) {
         gPreMegaTokuseiByPokeID[i] = 0;
@@ -360,29 +371,33 @@ inline void revertMegaFormInParty() {
         return;
     }
     gInMegaRevert = true;
-    PlayerWork::getClass()->initIfNeeded();
-    if (auto* party = PlayerWork::get_playerParty(); party != nullptr) {
-        const uint32_t count = party->fields.m_memberCount;
-        for (uint32_t i = 0; i < count && i < 6; ++i) {
-            auto* member = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(party->GetMemberPointer(i));
-            if (member == nullptr || member->IsNull()) {
-                continue;
-            }
-            const int monsNo = member->GetMonsNo();
-            const uint16_t form = member->GetFormNo();
-            if (findMegaByForm(monsNo, form) != nullptr) {
-                const bool isTrackedPlayerMega =
-                    (monsNo == gPlayerMegaSpecies && static_cast<int>(form) == gPlayerMegaForm);
-                if (member->IsHpZero()) {
-                    // Never call ChangeFormNo on a fainted Pokemon (it can recalculate/restore HP).
-                    if (member->fields.m_accessor != nullptr) {
-                        member->fields.m_accessor->SetFormNo(kBaseForm);
-                    }
-                } else {
-                    member->ChangeFormNo(kBaseForm, nullptr);
+    if (auto* pwCls = PlayerWork::getClass(); pwCls != nullptr) {
+        pwCls->initIfNeeded();
+        if (auto* party = PlayerWork::get_playerParty();
+            party != nullptr && party->fields.m_member != nullptr) {
+            const uint32_t count = party->fields.m_memberCount;
+            const uint64_t arrLen = party->fields.m_member->max_length;
+            for (uint32_t i = 0; i < count && i < 6 && i < arrLen; ++i) {
+                auto* member = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(party->GetMemberPointer(i));
+                if (member == nullptr || member->IsNull()) {
+                    continue;
                 }
-                if (isTrackedPlayerMega && gPlayerPreMegaTokusei > 0 && member->fields.m_accessor != nullptr) {
-                    member->fields.m_accessor->SetTokuseiNo(gPlayerPreMegaTokusei);
+                const int monsNo = member->GetMonsNo();
+                const uint16_t form = member->GetFormNo();
+                if (findMegaByForm(monsNo, form) != nullptr) {
+                    const bool isTrackedPlayerMega =
+                        (monsNo == gPlayerMegaSpecies && static_cast<int>(form) == gPlayerMegaForm);
+                    if (member->IsHpZero()) {
+                        // Never call ChangeFormNo on a fainted Pokemon (it can recalculate/restore HP).
+                        if (member->fields.m_accessor != nullptr) {
+                            member->fields.m_accessor->SetFormNo(kBaseForm);
+                        }
+                    } else {
+                        member->ChangeFormNo(kBaseForm, nullptr);
+                    }
+                    if (isTrackedPlayerMega && gPlayerPreMegaTokusei > 0 && member->fields.m_accessor != nullptr) {
+                        member->fields.m_accessor->SetTokuseiNo(gPlayerPreMegaTokusei);
+                    }
                 }
             }
         }
@@ -408,8 +423,12 @@ inline Dpr::Battle::Logic::EventFactor::EventHandlerTable::Array* resolveAbility
     uint16_t tokuseiNo, uint8_t* outPrio) {
     using namespace Dpr::Battle::Logic;
     system_load_typeinfo(0x8a5b);
-    Handler::Tokusei::getClass()->initIfNeeded();
-    auto* sf = Handler::Tokusei::getClass()->static_fields;
+    auto* tokCls = Handler::Tokusei::getClass();
+    if (tokCls == nullptr) {
+        return nullptr;
+    }
+    tokCls->initIfNeeded();
+    auto* sf = tokCls->static_fields;
     if (sf == nullptr || sf->GET_FUNC_TABLE == nullptr) {
         return nullptr;
     }
@@ -616,7 +635,9 @@ inline bool isMegaKeyItem(int32_t itemId) {
 }
 
 inline uint16_t ownedMegaAccessoryInBag() {
-    PlayerWork::getClass()->initIfNeeded();
+    auto* pwCls = PlayerWork::getClass();
+    if (pwCls == nullptr) return 0;
+    pwCls->initIfNeeded();
     if (PlayerWork::GetItem(kMegaRing).fields.Count > 0) return kMegaRing;
     if (PlayerWork::GetItem(kMegaBracelet).fields.Count > 0) return kMegaBracelet;
     if (PlayerWork::GetItem(kKeyStone).fields.Count > 0) return kKeyStone;
@@ -944,13 +965,20 @@ inline const MegaSpeciesEntry* targetTrainerMegaEntry(Dpr::Battle::Logic::BTL_PO
     return matchMegaCandidate(pokeParam);
 }
 
-// Selects the best Mega form for an NPC trainer's Pokemon (stat-aware for dual-Mega species).
-inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Pml::PokePara::CoreParam::Object* member) {
-    if (member == nullptr || member->IsNull() || member->GetFormNo() != kBaseForm) {
+// Safe wrapper for BTL_ACTION_PARAM::get_gen_cmd passing explicit nullptr MethodInfo* in x1.
+inline uint8_t getActionGenCmd(Dpr::Battle::Logic::BTL_ACTION_PARAM::Object* param) {
+    if (param == nullptr) return 0;
+    using Fn = uint8_t (*)(Dpr::Battle::Logic::BTL_ACTION_PARAM::Object*, const void*);
+    return reinterpret_cast<Fn>(exl::util::modules::GetTargetOffset(0x01f4d680))(param, nullptr);
+}
+
+// Selects the best Mega form for an NPC trainer's live BTL_POKEPARAM (stat-aware for dual-Mega species).
+inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp) {
+    if (bpp == nullptr || bpp->IsDead() || bpp->GetFormNo() != kBaseForm) {
         return nullptr;
     }
-    const int monsNo = member->GetMonsNo();
-    const int heldItem = member->GetItem();
+    const int monsNo = bpp->GetMonsNo();
+    const int heldItem = bpp->GetItem();
     if (const auto* byStone = findMegaByStone(monsNo, kBaseForm, heldItem); byStone != nullptr) {
         return byStone;
     }
@@ -961,7 +989,7 @@ inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Pml::PokePara::CorePar
             continue;
         }
         if (e.requiredMoveId > 0 && e.stoneItemId == 0) {
-            if (member->HaveWaza(e.requiredMoveId)) {
+            if (pokeKnowsMove(bpp, e.requiredMoveId)) {
                 return &e;
             }
             continue;
@@ -970,8 +998,8 @@ inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Pml::PokePara::CorePar
         else if (e.form == 2) form2 = &e;
     }
     if (form1 != nullptr && form2 != nullptr) {
-        const uint32_t atk = member->GetPower(static_cast<int32_t>(Pml::PokePara::PowerID::ATK));
-        const uint32_t spAtk = member->GetPower(static_cast<int32_t>(Pml::PokePara::PowerID::SPATK));
+        const int32_t atk = bpp->GetValue(Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_ATTACK);
+        const int32_t spAtk = bpp->GetValue(Dpr::Battle::Logic::BTL_POKEPARAM::ValueID::BPP_SP_ATTACK);
         // Absol Z (form 2) is faster/more physical than Mega Absol (form 1); for all other dual-Megas
         // (Charizard X/Y, Mewtwo X/Y, Raichu X/Y, Garchomp/Z, Lucario/Z), form 1 is physical and form 2 is special.
         if (monsNo == kAbsolSpecies) {
@@ -982,52 +1010,56 @@ inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Pml::PokePara::CorePar
     return (form1 != nullptr) ? form1 : form2;
 }
 
-// Equips each NPC trainer's ace Mega-capable Pokemon with its exact Mega Stone right before battle starts.
-inline void equipTrainerMegaStones(Dpr::Battle::Logic::BATTLE_SETUP_PARAM::Object* battleSetupParam) {
-    if (battleSetupParam == nullptr || battleSetupParam->fields.party == nullptr) {
+// Lazily equips an NPC trainer's ace Mega-capable Pokemon using BDSP's verified live BTL_PARTY
+// (never touches BATTLE_SETUP_PARAM::fields.party during SetupBattleTrainer).
+inline void equipTrainerMegaStonesForClient(Dpr::Battle::Logic::BTL_PARTY::Object* party, uint8_t clientID) {
+    if (clientID == 0 || clientID >= kMaxBattleClients || gTrainerStonesEquipped[clientID]) {
         return;
     }
-    auto* parties = battleSetupParam->fields.party;
-    const uint64_t numClients = (parties->max_length < kMaxBattleClients) ? parties->max_length : kMaxBattleClients;
-    for (uint64_t clientIdx = 1; clientIdx < numClients; ++clientIdx) {
-        auto* party = parties->m_Items[clientIdx];
-        if (party == nullptr) {
+    gTrainerStonesEquipped[clientID] = true;
+    if (party == nullptr || party->fields.m_pMember == nullptr) {
+        return;
+    }
+    const uint8_t count = party->fields.m_memberCount;
+    const uint64_t arrLen = party->fields.m_pMember->max_length;
+    if (count == 0 || arrLen == 0) {
+        return;
+    }
+
+    Dpr::Battle::Logic::BTL_POKEPARAM::Object* bestBpp = nullptr;
+    const MegaSpeciesEntry* bestEntry = nullptr;
+    uint8_t bestLevel = 0;
+    bool bestAlreadyHasStone = false;
+
+    for (uint8_t i = 0; i < count && i < 6 && i < arrLen; ++i) {
+        auto* bpp = party->GetMemberDataConst(i);
+        if (bpp == nullptr || bpp->fields.m_coreParam == nullptr ||
+            bpp->IsDead() || bpp->GetFormNo() != kBaseForm) {
             continue;
         }
-        const uint32_t count = party->fields.m_memberCount;
-        Pml::PokePara::CoreParam::Object* bestMember = nullptr;
-        const MegaSpeciesEntry* bestEntry = nullptr;
-        uint32_t bestLevel = 0;
-        bool bestAlreadyHasStone = false;
-
-        for (uint32_t i = 0; i < count && i < 6; ++i) {
-            auto* member = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(party->GetMemberPointer(i));
-            if (member == nullptr || member->IsNull() ||
-                member->IsEgg(Pml::PokePara::EggCheckType::BOTH_EGG) ||
-                member->GetFormNo() != kBaseForm) {
-                continue;
-            }
-            const auto* candidate = chooseBestTrainerMegaEntry(member);
-            if (candidate == nullptr) {
-                continue;
-            }
-            const bool alreadyHasStone = (candidate->stoneItemId != 0 &&
-                                          member->GetItem() == candidate->stoneItemId);
-            const uint32_t lv = member->GetLevel();
-            // Prefer a Pokemon already holding its Mega Stone; otherwise pick the highest-level ace
-            // (ties broken by later party slot, matching official Gym Leader / E4 / Champion ace order).
-            if (bestMember == nullptr ||
-                (alreadyHasStone && !bestAlreadyHasStone) ||
-                (alreadyHasStone == bestAlreadyHasStone && lv >= bestLevel)) {
-                bestMember = member;
-                bestEntry = candidate;
-                bestLevel = lv;
-                bestAlreadyHasStone = alreadyHasStone;
-            }
+        const auto* candidate = chooseBestTrainerMegaEntry(bpp);
+        if (candidate == nullptr) {
+            continue;
         }
+        const bool alreadyHasStone = (candidate->stoneItemId != 0 &&
+                                      bpp->GetItem() == candidate->stoneItemId);
+        const uint8_t lv = bpp->fields.m_coreParam->fields.level;
+        // Prefer a Pokemon already holding its Mega Stone; otherwise pick the highest-level ace
+        // (ties broken by later party slot, matching official Gym Leader / E4 / Champion ace order).
+        if (bestBpp == nullptr ||
+            (alreadyHasStone && !bestAlreadyHasStone) ||
+            (alreadyHasStone == bestAlreadyHasStone && lv >= bestLevel)) {
+            bestBpp = bpp;
+            bestEntry = candidate;
+            bestLevel = lv;
+            bestAlreadyHasStone = alreadyHasStone;
+        }
+    }
 
-        if (bestMember != nullptr && bestEntry != nullptr && bestEntry->stoneItemId != 0 && !bestAlreadyHasStone) {
-            bestMember->SetItem(bestEntry->stoneItemId);
+    if (bestBpp != nullptr && bestEntry != nullptr && bestEntry->stoneItemId != 0 && !bestAlreadyHasStone) {
+        bestBpp->fields.m_coreParam->fields.item = bestEntry->stoneItemId;
+        if (auto* srcPoke = bestBpp->GetSrcData(); srcPoke != nullptr && !srcPoke->IsNull()) {
+            srcPoke->SetItem(bestEntry->stoneItemId);
         }
     }
 }
@@ -1107,7 +1139,8 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     if (wazaList->fields._wazaButtons != nullptr) {
         const UnityEngine::Color::Fields armedColor{ .r = 1.0f, .g = 0.85f, .b = 0.12f, .a = 1.0f };
         const UnityEngine::Color::Fields normalColor = wazaList->fields._wazaTextColor.fields;
-        const uint64_t count = wazaList->fields._wazaButtons->max_length;
+        const uint64_t rawCount = wazaList->fields._wazaButtons->max_length;
+        const uint64_t count = (rawCount < 4) ? rawCount : 4;
         for (uint64_t i = 0; i < count; ++i) {
             auto* btn = wazaList->fields._wazaButtons->m_Items[i];
             if (btn != nullptr && btn->fields._text != nullptr) {
@@ -1126,7 +1159,9 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     system_load_typeinfo(0x8910);
     system_load_typeinfo(0x2c99);
     system_load_typeinfo(0xa963);
-    Dpr::Battle::Logic::Common::getClass()->initIfNeeded();
+    if (auto* commonCls = Dpr::Battle::Logic::Common::getClass(); commonCls != nullptr) {
+        commonCls->initIfNeeded();
+    }
 
     auto* param = pokeAction->fields.bpp;
     if (param == nullptr || param->IsDead()) {
@@ -1167,8 +1202,10 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
             msgDesc->fields.message->AddArg(param->GetItem());
             msgDesc->fields.message->AddArg(displayAccessory);
 
-            auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
-            container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
+            if (auto* msgResult = Dpr::Battle::Logic::Section_FromEvent_Message::Result::newInstance();
+                msgResult != nullptr) {
+                container->fields.m_section_FromEvent_Message->Execute(msgResult, &msgDesc);
+            }
         }
     }
 
@@ -1186,17 +1223,25 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
             formDesc->fields.successMessage->AddArg(pokeID);
 
             system_load_typeinfo(0x2c56);
-            auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
-            container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
+            if (auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
+                formResult != nullptr) {
+                container->fields.m_section_FromEvent_FormChange->Execute(formResult, &formDesc);
+            }
         }
     }
+
+    // Clear transient message-override context so later unrelated messages are never rewritten.
+    gCurrentEvoSpecies = 0;
+    gCurrentEvoForm = 0;
+    gCurrentEvoClientID = 0;
 
     const uint16_t megaAbility = static_cast<uint16_t>(entry->ability);
     param->fields.m_tokusei = megaAbility;
     if (param->fields.m_coreParam != nullptr) {
         param->fields.m_coreParam->fields.defaultTokusei = megaAbility;
     }
-    if (auto* srcPoke = param->GetSrcData(); srcPoke != nullptr && srcPoke->fields.m_accessor != nullptr) {
+    if (auto* srcPoke = param->GetSrcData();
+        srcPoke != nullptr && !srcPoke->IsNull() && srcPoke->fields.m_accessor != nullptr) {
         srcPoke->fields.m_accessor->SetTokuseiNo(megaAbility);
     }
 
@@ -1297,9 +1342,10 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetTokuseiNo) {
             mega::revertMegaFormInParty();
         }
         const uint16_t origVal = Orig(__this, methodInfo);
-        if (!mega::gInMegaTokuseiSwap && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded() && __this != nullptr) {
+        if (!mega::gInMegaTokuseiSwap && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded() &&
+            __this != nullptr && !__this->IsNull()) {
             if (const auto* entry = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); entry != nullptr) {
-                if (origVal == 0 || (mega::gPlayerPreMegaTokusei > 0 && origVal == mega::gPlayerPreMegaTokusei)) {
+                if (origVal == 0 || mega::isKnownPreMegaTokusei(origVal)) {
                     return static_cast<uint16_t>(entry->ability);
                 }
             }
@@ -1415,7 +1461,7 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType1) {
         if (mega::gAnyMegaActiveInBattle && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded()) {
+        if (__this != nullptr && !__this->IsNull() && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded()) {
             if (const auto* md = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); md != nullptr) {
                 return md->primaryType;
             }
@@ -1429,7 +1475,7 @@ HOOK_DEFINE_TRAMPOLINE(CoreParam$$GetType2) {
         if (mega::gAnyMegaActiveInBattle && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (__this != nullptr && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded()) {
+        if (__this != nullptr && !__this->IsNull() && mega::gAnyMegaActiveInBattle && !mega::isBattleEnded()) {
             if (const auto* md = mega::findMegaByForm(__this->GetMonsNo(), __this->GetFormNo()); md != nullptr) {
                 return md->secondaryType;
             }
@@ -1655,10 +1701,12 @@ HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$OnUpdate) {
 
             if (Dpr::Battle::View::BtlvInput::GetPush(kToggleMask, true)) {
                 mega::gMegaArmed = !mega::gMegaArmed;
-                Dpr::Battle::View::BattleViewCore::getClass()->initIfNeeded();
-                if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
-                    core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
-                    core->fields._UISystem_k__BackingField->PlaySe(mega::kSeUiSelect);
+                if (auto* bvCls = Dpr::Battle::View::BattleViewCore::getClass(); bvCls != nullptr) {
+                    bvCls->initIfNeeded();
+                    if (auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
+                        core != nullptr && core->fields._UISystem_k__BackingField != nullptr) {
+                        core->fields._UISystem_k__BackingField->PlaySe(mega::kSeUiSelect);
+                    }
                 }
             }
         }
@@ -1734,27 +1782,30 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
         const uint8_t numAction = Dpr::Battle::Logic::SVCL_ACTION::GetNumAction(instructions, clientID);
         const bool clientUsedMega = (clientID < mega::kMaxBattleClients) ? mega::gClientMegaUsed[clientID] : true;
 
-        // For NPC trainers (clientID > 0), automatically trigger Mega Evolution right before their
-        // Mega-stone-holding Pokemon executes its first Fight move in battle.
+        // For NPC trainers (clientID > 0), lazily equip their ace Mega Stone once via BDSP's verified
+        // live BTL_PARTY, then trigger Mega Evolution right before their Mega-capable Pokemon's first Fight move.
         int trainerMegaSlot = -1;
-        if (clientID > 0 && clientID < mega::kMaxBattleClients && !clientUsedMega && mega::gIsTrainerBattle) {
+        if (clientID > 0 && clientID < mega::kMaxBattleClients && mega::gIsTrainerBattle && mega::gMegaBattleAllowed) {
             const auto comp = sec->GetCompetitor();
             if (comp == Dpr::Battle::Logic::BtlCompetitor::BTL_COMPETITOR_TRAINER ||
                 comp == Dpr::Battle::Logic::BtlCompetitor::BTL_COMPETITOR_INST) {
-                for (uint8_t idx = 0; idx < numAction; ++idx) {
-                    auto* rawInst = Dpr::Battle::Logic::SVCL_ACTION::Get(instructions, clientID, idx);
-                    if (rawInst == nullptr) {
-                        continue;
-                    }
-                    Dpr::Battle::Logic::BTL_ACTION_PARAM::Object probe{};
-                    probe.fields.raw = rawInst->fields.raw;
-                    if (probe.get_gen_cmd() != mega::kBtlActionFight) {
-                        continue;
-                    }
-                    auto* bpp = __this->getActionPoke(&probe, clientID);
-                    if (mega::targetTrainerMegaEntry(bpp, clientID) != nullptr) {
-                        trainerMegaSlot = static_cast<int>(idx);
-                        break;
+                mega::equipTrainerMegaStonesForClient(party, clientID);
+                if (!clientUsedMega) {
+                    for (uint8_t idx = 0; idx < numAction; ++idx) {
+                        auto* rawInst = Dpr::Battle::Logic::SVCL_ACTION::Get(instructions, clientID, idx);
+                        if (rawInst == nullptr) {
+                            continue;
+                        }
+                        Dpr::Battle::Logic::BTL_ACTION_PARAM::Object probe{};
+                        probe.fields.raw = rawInst->fields.raw;
+                        if (mega::getActionGenCmd(&probe) != mega::kBtlActionFight) {
+                            continue;
+                        }
+                        auto* bpp = __this->getActionPoke(&probe, clientID);
+                        if (mega::targetTrainerMegaEntry(bpp, clientID) != nullptr) {
+                            trainerMegaSlot = static_cast<int>(idx);
+                            break;
+                        }
                     }
                 }
             }
@@ -1792,7 +1843,8 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
                 if (mega::getMegaFlag(inst)) {
                     if (!queuedMegaForClient && !clientUsedMega) {
                         auto* megaAction = Dpr::Battle::Logic::PokeAction::newInstance();
-                        if (__this->setupPokeAction_FromClientInstruction(megaAction, &inst, clientID)) {
+                        if (megaAction != nullptr &&
+                            __this->setupPokeAction_FromClientInstruction(megaAction, &inst, clientID)) {
                             actionContainer->Add(&megaAction);
                             queuedMegaForClient = true;
                         }
@@ -1801,7 +1853,8 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
                 }
 
                 auto* normalAction = Dpr::Battle::Logic::PokeAction::newInstance();
-                if (__this->setupPokeAction_FromClientInstruction(normalAction, &inst, clientID)) {
+                if (normalAction != nullptr &&
+                    __this->setupPokeAction_FromClientInstruction(normalAction, &inst, clientID)) {
                     actionContainer->Add(&normalAction);
                 }
             }
@@ -1822,8 +1875,12 @@ HOOK_DEFINE_TRAMPOLINE(setupPokeAction_FromClientInstruction) {
         instruction.fields.raw = clientInstruction->fields.raw;
 
         if (mega::getMegaFlag(instruction)) {
+            auto* actionPoke = __this->getActionPoke(clientInstruction, clientID);
+            if (actionPoke == nullptr) {
+                return false;
+            }
             pokeAction->fields.actionCategory = Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution;
-            pokeAction->fields.bpp = __this->getActionPoke(clientInstruction, clientID);
+            pokeAction->fields.bpp = actionPoke;
             pokeAction->fields.priority = 2;
             pokeAction->fields.clientID = clientID;
             pokeAction->fields.fDone = false;
@@ -1831,7 +1888,8 @@ HOOK_DEFINE_TRAMPOLINE(setupPokeAction_FromClientInstruction) {
             pokeAction->fields.fRecalcPriority = false;
 
             auto* battleEnv = reinterpret_cast<Dpr::Battle::Logic::BattleEnv::Object*>(__this->fields.m_pBattleEnv);
-            if (battleEnv != nullptr && battleEnv->fields.m_actionSerialNoManager != nullptr) {
+            if (battleEnv != nullptr && battleEnv->fields.m_actionSerialNoManager != nullptr &&
+                pokeAction->fields.actionDesc != nullptr) {
                 battleEnv->fields.m_actionSerialNoManager->AssignSerialNo(pokeAction->fields.actionDesc);
             }
             return true;
@@ -1898,9 +1956,6 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
                                      rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID));
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, arenaID, mapAttrib, weatherType, rule, enemyID0, enemyID1, partnerID, methodInfo);
-        if (mega::gMegaBattleAllowed) {
-            mega::equipTrainerMegaStones(battleSetupParam);
-        }
     }
 };
 
@@ -1910,7 +1965,8 @@ void installSharedPostInitHooks() {
         return;
     }
 
-    // Shared hooks installed after Luminescent Platinum subsdk1 initializes.
+    // All hooks shared with Luminescent Platinum subsdk1 MUST install here so subsdk2 chains cleanly
+    // AFTER subsdk1's exl_main() finishes (preventing ARM64 16-byte trampoline stub collisions).
     BTL_POKEPARAM$$GetValue::InstallAtOffset(0x01fdd010);
     BTL_POKEPARAM$$GetPokeType::InstallAtOffset(0x01fdfa80);
     BTL_POKEPARAM$$IsMatchType::InstallAtOffset(0x01fdfad0);
@@ -1920,32 +1976,32 @@ void installSharedPostInitHooks() {
     PersonalSystem$$GetPersonalData::InstallAtOffset(0x024a0ca0);
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
+    CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
+    MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
+    BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
+    BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
+    BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
+    SetupBattleWild::InstallAtOffset(0x02c3abc0);
+    SetupBattleTrainer::InstallAtOffset(0x02c3b800);
 }
 } // namespace mega
 
 extern "C" void exl_main(void*, void*) {
     exl::hook::Initialize();
 
-    // Non-colliding hooks installed single-threaded before nnMain (zero thread-safety race risk).
+    // Strictly non-colliding hooks installed single-threaded before nnMain (zero subsdk1 overlap).
     ItemData$$GetParam::InstallAtOffset(0x0249b950);
-    CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     UIManager$$GetPokemonIconData::InstallAtOffset(0x017c1250);
     AssetManager$$AppendAssetBundleRequest::InstallAtOffset(0x022dbfb0);
     AssetManager$$UnloadAssetBundle::InstallAtOffset(0x022dbde0);
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
-    MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
     UIText$$SetupMessage_Label::InstallAtOffset(0x01dd18d0);
     UIText$$SetupMessage_Index::InstallAtOffset(0x01dd1940);
-    BUIWazaList$$Initialize::InstallAtOffset(0x01d2b800);
-    BUIWazaList$$OnShow::InstallAtOffset(0x01d2cb70);
-    BUIWazaList$$OnUpdate::InstallAtOffset(0x01d2c490);
     BUIWazaList$$OnSubmit::InstallAtOffset(0x01d2c6e0);
     CalcActionPriority$$Execute::InstallAtOffset(0x021ad570);
     ProcessActionCore$$action::InstallAtOffset(0x021c0de0);
     setupPokeAction_FromClientInstruction::InstallAtOffset(0x021cdbf0);
     createPokeAction_FromClientInstruction::InstallAtOffset(0x021cdad0);
-    SetupBattleWild::InstallAtOffset(0x02c3abc0);
-    SetupBattleTrainer::InstallAtOffset(0x02c3b800);
 }
 
 extern "C" NORETURN void exl_exception_entry() {
