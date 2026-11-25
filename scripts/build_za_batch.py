@@ -145,14 +145,23 @@ def discover_za_pack(pack_dir: Path) -> dict[str, Path]:
     trmsh_h = int(trmsh_path.stem.split("_")[1], 16)
     mtrs = []
     for f in sorted(pack_dir.glob("*.trmtr")):
+        if f.stat().st_size < 3000:
+            continue
         if b"BaseColorMap" in f.read_bytes():
             mh = int(f.stem.split("_")[1], 16)
-            mtrs.append((abs(mh - trmsh_h), f))
-    mtrs.sort()
+            mtrs.append((f.stat().st_size, abs(mh - trmsh_h), f))
+    if not mtrs:
+        for f in sorted(pack_dir.glob("*.trmtr")):
+            if b"BaseColorMap" in f.read_bytes():
+                mh = int(f.stem.split("_")[1], 16)
+                mtrs.append((f.stat().st_size, abs(mh - trmsh_h), f))
     if not mtrs:
         raise FileNotFoundError(f"No TRMTR found in {pack_dir}")
-    norm_trmtr = mtrs[0][1]
-    rare_trmtr = mtrs[1][1] if len(mtrs) > 1 else mtrs[0][1]
+    # Keep the top 2 largest TRMTR files (Normal & Shiny), then pick Normal as the one closest in hash to TRMSH
+    mtrs.sort(key=lambda x: -x[0])
+    top2 = sorted(mtrs[:2], key=lambda x: x[1])
+    norm_trmtr = top2[0][2]
+    rare_trmtr = top2[1][2] if len(top2) > 1 else top2[0][2]
 
     return {
         "trmsh": trmsh_path,
@@ -907,6 +916,23 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
     "pm0227_51_00": {"pm0227_51_00_hair_b_mesh_shape"},
     # Mega Sharpedo: keep primary eye_a, skip swappable eye_b duplicate
     "pm0319_51_00": {"pm0319_51_00_eye_b_mesh_shape"},
+    # Phase 4 (24 BDSP-unlocked forms): skip closed eyelids & folded/alternate overlays
+    "pm0018_51_00": {
+        "pm0018_51_00_l_wing_b_mesh_shape",
+        "pm0018_51_00_r_wing_b_mesh_shape",
+        "pm0018_51_00_leg_b_mesh_shape",
+    },
+    "pm0127_51_00": {
+        "pm0127_51_00_upper_eyelid_mesh_shape",
+        "pm0127_51_00_lower_eyelid_mesh_shape",
+    },
+    "pm0260_51_00": {"pm0260_51_00_lower_eyelid_mesh_shape"},
+    "pm0308_51_00": {"pm0308_51_00_eye_b_mesh_shape"},
+    "pm0354_51_00": {"pm0354_51_00_eyelid_mesh_shape", "pm0354_51_00_eye_b_mesh_shape"},
+    "pm0362_51_00": {"pm0362_51_00_eyelid_mesh_shape"},
+    "pm0376_51_00": {"pm0376_51_00_eye_b_mesh_shape"},
+    "pm0428_51_00": {"pm0428_51_00_eyelid_mesh_shape"},
+    "pm0485_51_00": {"pm0485_51_00_eyelid_mesh_shape"},
 }
 
 
@@ -926,6 +952,9 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
     van_materials = van_data["materials"]
     van_min_y = float(van_data["minY"])
     van_h = float(van_data["height"])
+    if species == "pm0362" and van_h < 0.5:
+        van_h = 1.50
+        van_min_y = 0.15
 
     nodes, rig_to_node = parse_trskl(files["trskl"])
     rig_map, fallback_bone = build_universal_bone_remapper(van_bones, nodes, rig_to_node)

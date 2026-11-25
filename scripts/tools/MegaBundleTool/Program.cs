@@ -95,7 +95,7 @@ internal static class Program
             var go = am.GetBaseField(inst, f.GetAssetInfo(sb["m_GameObject.m_PathID"].AsLong)!);
             string name = go["m_Name"].AsString;
             int boneCount = sb["m_Bones.Array"].Children.Count;
-            int score = boneCount + (name.Contains("BodySkin", StringComparison.OrdinalIgnoreCase) ? 10000 : 0);
+            int score = boneCount + ((boneCount > 2 && name.Contains("BodySkin", StringComparison.OrdinalIgnoreCase)) ? 10000 : 0);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -180,17 +180,24 @@ internal static class Program
         return new StreamLayout(strides, offsets, vCount, chs);
     }
 
+    private static readonly string BdspRoot =
+        "/Users/kshiteesh/Desktop/pokemon/brilliant diamond/rom-extract/Data/StreamingAssets/AssetAssistant/Pokemon Database/pokemons";
+
     private static (string BattlePath, string? CommonPath) ResolveDonorPaths(string species)
     {
         string battle = Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00");
         if (!File.Exists(battle))
             battle = Path.Combine(LumiRoot, $"battle/{species}_00_00");
         if (!File.Exists(battle))
+            battle = Path.Combine(BdspRoot, $"battle/{species}_00_00");
+        if (!File.Exists(battle))
             throw new FileNotFoundException($"Vanilla battle bundle not found for {species}", battle);
 
         string common = Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00");
         if (!File.Exists(common))
             common = Path.Combine(LumiRoot, $"common/{species}_00");
+        if (!File.Exists(common))
+            common = Path.Combine(BdspRoot, $"common/{species}_00");
         return (battle, File.Exists(common) ? common : null);
     }
 
