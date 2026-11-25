@@ -439,6 +439,7 @@ def build_universal_bone_remapper(
     nodes: list[tuple[str, int, int]],
     rig_to_node: dict[int, int],
 ) -> tuple[dict[int, int], int]:
+    import re
     van_idx = {b: i for i, b in enumerate(van_bones)}
     van_lower = {b.lower(): i for i, b in enumerate(van_bones)}
 
@@ -475,51 +476,98 @@ def build_universal_bone_remapper(
         "right_arm_02": ("RForeArm", "RArm2", "RArm"),
         "right_hand": ("RHand", "RForeArm", "RArm"),
         "left_thigh": ("LThigh", "LLeg1", "LLeg", "Hips", "Waist"),
+        "left_leg_01": ("LThigh", "LLeg1", "LLeg", "Hips", "Waist"),
+        "left_leg_02": ("LLeg", "LLeg2", "LThigh"),
+        "left_leg_03": ("LFoot", "LLeg2", "LLeg"),
         "left_leg": ("LLeg", "LLeg2", "LThigh"),
         "left_foot": ("LFoot", "LLeg"),
         "left_toe": ("LToe", "LToeA1", "LFoot"),
         "right_thigh": ("RThigh", "RLeg1", "RLeg", "Hips", "Waist"),
+        "right_leg_01": ("RThigh", "RLeg1", "RLeg", "Hips", "Waist"),
+        "right_leg_02": ("RLeg", "RLeg2", "RThigh"),
+        "right_leg_03": ("RFoot", "RLeg2", "RLeg"),
         "right_leg": ("RLeg", "RLeg2", "RThigh"),
         "right_foot": ("RFoot", "RLeg"),
         "right_toe": ("RToe", "RToeA1", "RFoot"),
-        "tail_01": ("Tail1", "Tail", "Hips", "Waist"),
-        "tail_02": ("Tail2", "Tail1", "Tail"),
-        "tail_03": ("Tail3", "Tail2", "Tail1", "Tail"),
-        "tail_04": ("Tail4", "Tail3", "Tail2", "Tail"),
-        "tail_05": ("Tail5", "Tail4", "Tail3", "Tail"),
-        "tail_06": ("Tail6", "Tail5", "Tail4", "Tail"),
-        "tail_07": ("Tail7", "Tail6", "Tail5", "Tail"),
     }
 
-    def resolve_name(nl: str) -> int | None:
+    def has_limb_or_tail_ancestor(nidx: int) -> bool:
+        cur = nodes[nidx][1] if 0 <= nidx < len(nodes) else -1
+        guard = 0
+        while 0 <= cur < len(nodes) and guard < 20:
+            pnm = nodes[cur][0].lower()
+            if any(k in pnm for k in ("hand", "arm", "shoulder", "leg", "foot", "thigh", "tail", "wing")):
+                return True
+            if any(k in pnm for k in ("head", "neck", "spine", "waist", "hips")):
+                return False
+            cur = nodes[cur][1]
+            guard += 1
+        return False
+
+    def resolve_name(nl: str, nidx: int) -> int | None:
         if nl in van_lower:
             return van_lower[nl]
         if nl in semantic_candidates:
             m = first_match(*semantic_candidates[nl])
             if m is not None:
                 return m
-        # Generic left_/right_ camelcase match (e.g. left_wing_01 -> LWing1 / LFeeler1 / LFeather1)
+
+        # Numbered tail chain: tail_01..tail_12 -> Tail{k} (clamping down to max available TailN)
+        m_tail = re.match(r"^tail_(?:[a-z]_)?0*(\d+)$", nl)
+        if m_tail:
+            k = int(m_tail.group(1))
+            cands = [f"Tail{j}" for j in range(k, 0, -1)] + ["Tail", "Hips", "Waist"]
+            return first_match(*cands)
+
+        # Context-aware feeler_*: if attached to a hand/arm/leg/tail/wing (e.g. Mega Heracross claw shell,
+        # Charizard Y tail tip), return None so resolve_node inherits its anatomical parent bone!
+        if "feeler" in nl and has_limb_or_tail_ancestor(nidx):
+            return None
+
         side = "L" if nl.startswith("left_") else ("R" if nl.startswith("right_") else "")
         if side:
             rest = nl.split("_", 1)[1]
+            # 1) Numbered wing chain BEFORE arm (BDSP Charizard wings are LFeeler1..6!)
             if "wing" in rest:
-                return first_match(f"{side}Wing1", f"{side}Wing", f"{side}Arm", f"{side}Feeler1", f"{side}Shoulder", "Spine2")
-            if "finger" in rest or "index" in rest or "middle" in rest or "ring" in rest or "thumb" in rest or "pinky" in rest:
-                return first_match(f"{side}FingerA1", f"{side}FingerA", f"{side}Hand", f"{side}ForeArm")
-            if "toe" in rest:
-                return first_match(f"{side}Toe", f"{side}ToeA1", f"{side}Foot", f"{side}Leg")
-            if "ear" in rest or "horn" in rest:
-                return first_match(f"{side}Ear1", f"{side}Ear", f"{side}Feeler1", "Head")
-            if "hair" in rest:
-                return first_match(f"{side}Hair1", "Hair1", "Head")
-            if "arm" in rest:
-                return first_match(f"{side}Arm", f"{side}ForeArm", f"{side}Shoulder")
-            if "leg" in rest or "knee" in rest:
-                return first_match(f"{side}Leg", f"{side}Thigh")
-            if "foot" in rest or "ankle" in rest:
+                m_num = re.search(r"0*(\d+)$", rest)
+                k = int(m_num.group(1)) if m_num else 1
+                cands = []
+                for j in range(k, 0, -1):
+                    cands.extend([f"{side}Wing{j}", f"{side}Feeler{j}", f"{side}Feather{j}"])
+                cands.extend([f"{side}Wing", f"{side}FeelerA1", f"{side}Arm", f"{side}Shoulder", "Spine2"])
+                return first_match(*cands)
+            # 2) Foot / Toe STRICTLY BEFORE Finger/Index/Middle/Ring (fixes left_foot_index -> LToe/LFoot!)
+            if "foot" in rest or "toe" in rest or "ankle" in rest:
+                if any(k in rest for k in ("toe", "index", "middle", "ring", "thumb", "pinky")):
+                    return first_match(f"{side}Toe", f"{side}ToeA1", f"{side}Foot", f"{side}Leg")
                 return first_match(f"{side}Foot", f"{side}Leg")
+            # 3) Hand fingers (only when NOT a foot bone)
+            if any(k in rest for k in ("finger", "index", "middle", "ring", "thumb", "pinky")):
+                return first_match(f"{side}FingerA1", f"{side}FingerA", f"{side}Hand", f"{side}ForeArm")
+            # 4) Thigh vs Shin (leg_01 -> LThigh, leg_02 -> LLeg)
+            if "leg" in rest or "knee" in rest or "thigh" in rest:
+                if ("thigh" in rest or re.search(r"(^|_)0*1($|_)", rest)) and "knee" not in rest:
+                    return first_match(f"{side}Thigh", f"{side}Leg1", f"{side}Leg")
+                return first_match(f"{side}Leg", f"{side}Leg2", f"{side}Thigh")
+            # 5) Upper arm vs Forearm
+            if "arm" in rest:
+                if re.search(r"(^|_)0*2($|_)", rest):
+                    return first_match(f"{side}ForeArm", f"{side}Arm2", f"{side}Arm")
+                return first_match(f"{side}Arm", f"{side}Arm1", f"{side}Shoulder")
+            if "hand" in rest:
+                return first_match(f"{side}Hand", f"{side}ForeArm", f"{side}Arm")
+            if "ear" in rest or "horn" in rest:
+                return first_match(f"{side}Ear1", f"{side}Ear", f"{side}Feeler1", f"{side}FeelerA1", "Head")
+            if "hair" in rest:
+                return first_match(f"{side}Hair1", f"{side}Hair", "Hair1", "Hair", "Head")
             if "feeler" in rest:
-                return first_match(f"{side}Feeler1", f"{side}FeelerB1", f"{side}Shoulder", "Head")
+                m_num = re.search(r"0*(\d+)$", rest)
+                k = int(m_num.group(1)) if m_num else 1
+                cands = []
+                for j in range(k, 0, -1):
+                    cands.extend([f"{side}FeelerA{j}", f"{side}Feeler{j}", f"{side}FeelerB{j}"])
+                cands.extend([f"{side}Feeler1", f"{side}FeelerA1", "Head"])
+                return first_match(*cands)
         if "eyelid" in nl or "eye" in nl or "teeth" in nl or "mouth" in nl or "beak" in nl:
             return first_match("Head", "Neck2", "Neck1", "Spine2")
         if "jaw" in nl:
@@ -533,7 +581,7 @@ def build_universal_bone_remapper(
         guard = 0
         while 0 <= cur < len(nodes) and guard < 40:
             name, parent, _ = nodes[cur]
-            hit = resolve_name(name.lower())
+            hit = resolve_name(name.lower(), cur)
             if hit is not None:
                 return hit
             cur = parent
@@ -974,19 +1022,82 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
     za_to_slot, slot_to_zamats, slot_scale_x = plan_material_slots(used_mats, van_materials)
 
-    # Compute uniform scale & grounding from core body shapes (ignore VFX & outlier vine shapes)
+    # Compute skeleton-anchored core-body scale, Y grounding, and Z alignment (prevents tall horns/wings
+    # from shrinking body proportions like Mega Heracross 0.66x, and aligns spine/hip pivots in Z).
     body_ys = []
+    bone_acc: dict[int, list[float]] = {}
     for sh in shapes:
         if any(m[0].lower().startswith("eff_") for m in sh["mats"]):
             continue
         if spec.za_pack == "pm0071_51_00" and "leaf" in sh["name"].lower():
             continue
         body_ys.extend(sh["verts"][:, 1].tolist())
+        v_arr = sh["verts"]
+        bi_arr = sh["b_idx"]
+        bw_arr = sh["b_w"]
+        for vi in range(len(v_arr)):
+            vy_v = float(v_arr[vi, 1])
+            vz_v = float(v_arr[vi, 2])
+            for k in range(4):
+                wk = float(bw_arr[vi, k])
+                if wk <= 1e-4:
+                    continue
+                tb = rig_map.get(int(bi_arr[vi, k]), fallback_bone)
+                acc = bone_acc.get(tb)
+                if acc is None:
+                    bone_acc[tb] = [vy_v * wk, vz_v * wk, wk]
+                else:
+                    acc[0] += vy_v * wk
+                    acc[1] += vz_v * wk
+                    acc[2] += wk
+
     za_min_y, za_max_y = min(body_ys), max(body_ys)
     za_h = max(za_max_y - za_min_y, 1e-3)
-    scale = (van_h * spec.height_ratio) / za_h
+    scale_bbox = (van_h * spec.height_ratio) / za_h
+
+    core_scale_names = {"hips", "spine", "spine1", "spine2", "head", "larm", "rarm", "lthigh", "rthigh"}
+    core_z_names = {"hips", "spine", "spine1", "spine2", "head", "lthigh", "rthigh"}
+    van_bone_pos = {b["idx"]: (b["name"].lower(), b["pos"]) for b in van_data["bones"]}
+
+    implied_scales = []
+    for bi, (bnl, bpos) in van_bone_pos.items():
+        if bnl not in core_scale_names or bi not in bone_acc:
+            continue
+        acc = bone_acc[bi]
+        if acc[2] < 15.0:
+            continue
+        za_cy = acc[0] / acc[2]
+        van_span = float(bpos[1]) - van_min_y
+        za_span = za_cy - za_min_y
+        if van_span > 0.15 and za_span > 0.15:
+            implied_scales.append((van_span / za_span) * spec.height_ratio)
+
+    if len(implied_scales) >= 2:
+        implied_scales.sort()
+        scale_core = implied_scales[len(implied_scales) // 2]
+        scale = max(0.72 * scale_bbox, min(1.48 * scale_bbox, scale_core))
+    else:
+        scale = scale_bbox
+
     ty = van_min_y - za_min_y * scale
-    print(f"  Scale={scale:.4f} (ZA h={za_h:.3f}m -> {za_h*scale:.3f}m, minY={van_min_y:.3f}), slots={len(van_materials)}, used_mats={len(used_mats)}")
+
+    implied_tzs = []
+    for bi, (bnl, bpos) in van_bone_pos.items():
+        if bnl not in core_z_names or bi not in bone_acc:
+            continue
+        acc = bone_acc[bi]
+        if acc[2] < 15.0:
+            continue
+        za_cz = acc[1] / acc[2]
+        implied_tzs.append(float(bpos[2]) - za_cz * scale)
+    if implied_tzs:
+        implied_tzs.sort()
+        raw_tz = implied_tzs[len(implied_tzs) // 2]
+        tz = max(-0.45 * van_h, min(0.45 * van_h, raw_tz))
+    else:
+        tz = 0.0
+
+    print(f"  Scale={scale:.4f} (bbox={scale_bbox:.4f}, ZA h={za_h:.3f}m -> {za_h*scale:.3f}m, minY={van_min_y:.3f}, tz={tz:+.3f}), slots={len(van_materials)}, used_mats={len(used_mats)}")
 
     # Bake textures per populated vanilla slot (Sub{slot}_col)
     textures_meta: dict[str, list[int]] = {}
@@ -1056,7 +1167,7 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
                 vx = float(-v_za[0] * scale)
                 vy = float(v_za[1] * scale + ty)
-                vz = float(v_za[2] * scale)
+                vz = float(v_za[2] * scale + tz)
                 nx = float(-n_za[0])
                 ny = float(n_za[1])
                 nz = float(n_za[2])
@@ -1108,12 +1219,16 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
     }))
     tris_total = sum(len(s) // 3 for s in submeshes)
     print(f"  Wrote {mesh_json}: verts={len(all_verts)}, tris={tris_total}, submesh_tris={[len(s)//3 for s in submeshes]}")
-    render_textured_qa(form_id, mesh_json, out_dir, slot_scale_x, QA_DIR / f"{form_id}_za_qa.png")
+    if not getattr(build_variant, "no_render", False):
+        render_textured_qa(form_id, mesh_json, out_dir, slot_scale_x, QA_DIR / f"{form_id}_za_qa.png")
 
 
 def main() -> None:
     argv = sys.argv
-    targets = argv[argv.index("--") + 1 :] if "--" in argv else []
+    raw_args = argv[argv.index("--") + 1 :] if "--" in argv else []
+    no_render = "--no-render" in raw_args
+    build_variant.no_render = no_render
+    targets = [a for a in raw_args if a != "--no-render"]
     by_key = {f"pm{m.species:04d}_{m.form:02d}": m for m in MEGA_CATALOG}
     selected = [by_key[t] for t in targets] if targets else []
     if not selected:
@@ -1126,7 +1241,7 @@ def main() -> None:
         build_variant(spec, False, files)
         build_variant(spec, True, files)
 
-    print(f"\nALL {len(selected) * 2} VARIANTS BUILT & RENDERED!")
+    print(f"\nALL {len(selected) * 2} VARIANTS BUILT!")
 
 
 if __name__ == "__main__":
