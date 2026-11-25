@@ -185,20 +185,28 @@ internal static class Program
 
     private static (string BattlePath, string? CommonPath) ResolveDonorPaths(string species)
     {
-        string battle = Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00");
-        if (!File.Exists(battle))
-            battle = Path.Combine(LumiRoot, $"battle/{species}_00_00");
-        if (!File.Exists(battle))
-            battle = Path.Combine(BdspRoot, $"battle/{species}_00_00");
-        if (!File.Exists(battle))
-            throw new FileNotFoundException($"Vanilla battle bundle not found for {species}", battle);
+        string[] battleCandidates =
+        {
+            Path.Combine(RepoRoot, $"build/{species}-source/battle/{species}_00_00"),
+            Path.Combine(LumiRoot, $"battle/{species}_00_00"),
+            Path.Combine(BdspRoot, $"battle/{species}_00_00"),
+            Path.Combine(LumiRoot, $"battle/{species}_11_00"),
+            Path.Combine(BdspRoot, $"battle/{species}_11_00"),
+        };
+        string? battle = battleCandidates.FirstOrDefault(File.Exists);
+        if (battle == null)
+            throw new FileNotFoundException($"Vanilla battle bundle not found for {species}", battleCandidates[1]);
 
-        string common = Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00");
-        if (!File.Exists(common))
-            common = Path.Combine(LumiRoot, $"common/{species}_00");
-        if (!File.Exists(common))
-            common = Path.Combine(BdspRoot, $"common/{species}_00");
-        return (battle, File.Exists(common) ? common : null);
+        string[] commonCandidates =
+        {
+            Path.Combine(RepoRoot, $"build/{species}-source/common/{species}_00"),
+            Path.Combine(LumiRoot, $"common/{species}_00"),
+            Path.Combine(BdspRoot, $"common/{species}_00"),
+            Path.Combine(LumiRoot, $"common/{species}_11"),
+            Path.Combine(BdspRoot, $"common/{species}_11"),
+        };
+        string? common = commonCandidates.FirstOrDefault(File.Exists);
+        return (battle, common);
     }
 
     private static string GetTemplateCommonPath()
@@ -1669,11 +1677,13 @@ internal static class Program
         var f = battleInst.file;
 
         string baseFormId = $"{species}_00_00";
+        string lumiAltFormId = $"{species}_11_00";
         battleBun.file.BlockAndDirInfo.DirectoryInfos[0].Name = newCab;
         foreach (var goInfo in f.GetAssetsOfType(AssetClassID.GameObject))
         {
             var goBf = am.GetBaseField(battleInst, goInfo);
-            if (goBf["m_Name"].AsString == baseFormId)
+            string goName = goBf["m_Name"].AsString;
+            if (goName == baseFormId || goName == lumiAltFormId)
             {
                 goBf["m_Name"].AsString = formId;
                 goInfo.SetNewData(goBf);
@@ -1689,6 +1699,8 @@ internal static class Program
                 string k = cont["first"].AsString;
                 if (k.Contains(baseFormId))
                     cont["first"].AsString = k.Replace(baseFormId, formId);
+                else if (k.Contains(lumiAltFormId))
+                    cont["first"].AsString = k.Replace(lumiAltFormId, formId);
             }
             abInfo.SetNewData(abBf);
         }

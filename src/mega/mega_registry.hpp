@@ -65,6 +65,7 @@ constexpr int kReckless      = 120;
 constexpr int kBadDreams     = 123;
 constexpr int kSheerForce    = 125;
 constexpr int kMultiscale    = 136;
+constexpr int kInfiltrator   = 151;
 constexpr int kMagicBounce   = 156;
 constexpr int kPrankster     = 158;
 constexpr int kSandForce     = 159;
@@ -173,6 +174,9 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 478, 1, 868,  0,  70,  80,  70, 140, 100, 120, kSlushRush,    kTypeIce,      kTypeGhost,     296, "pm0478_51_00", "pm0478_51_10", true,  "Froslass",    "Mega Froslass",    "Froslassite" },
     { 485, 1, 869,  0,  91, 120, 106, 175, 141,  67, kFlashFire,    kTypeFire,     kTypeSteel,    5700, "pm0485_51_00", "pm0485_51_10", true,  "Heatran",     "Mega Heatran",     "Heatranite" },
     { 491, 1, 870,  0,  70, 120, 130, 165, 130,  85, kBadDreams,    kTypeDark,     kTypeDark,     2400, "pm0491_51_00", "pm0491_51_10", true,  "Darkrai",     "Mega Darkrai",     "Darkranite" },
+
+    // ======================== UNOVA (Lumi 2.2F Expanded Dex: 1) =
+    { 609, 1, 1059, 0,  60,  75, 110, 175, 110,  90, kInfiltrator,  kTypeGhost,    kTypeFire,      696, "pm0609_51_00", "pm0609_51_10", true,  "Chandelure",  "Mega Chandelure",  "Chandelurite" },
 };
 
 constexpr size_t kMegaRegistryCount = sizeof(kMegaRegistry) / sizeof(kMegaRegistry[0]);
@@ -182,10 +186,10 @@ constexpr bool isValidBDSPAbility(int abilityId) {
 }
 
 constexpr bool validateMegaRegistry() {
-    if (kMegaRegistryCount != 63) return false;
+    if (kMegaRegistryCount != 64) return false;
     for (size_t i = 0; i < kMegaRegistryCount; ++i) {
         const auto& e = kMegaRegistry[i];
-        if (e.species <= 0 || e.species > 493 || e.form <= 0) return false;
+        if (e.species <= 0 || (e.species > 493 && e.species != 609) || e.form <= 0) return false;
         // Must have either a valid Mega Stone OR a required move (never both 0!)
         if (e.stoneItemId == 0 && e.requiredMoveId == 0) return false;
         if (e.stoneItemId >= 1278) return false;

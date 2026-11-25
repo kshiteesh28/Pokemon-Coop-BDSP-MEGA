@@ -117,13 +117,15 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(478, 1, "Mega Froslass",    "sinnoh", 51, 868,  False, 1.02),
     MegaFormSpec(485, 1, "Mega Heatran",     "sinnoh", 51, 869,  False, 1.04),
     MegaFormSpec(491, 1, "Mega Darkrai",     "sinnoh", 51, 870,  True,  1.04),
+    # --- Unova (Luminescent Platinum 2.2F expanded dex: 1) ---
+    MegaFormSpec(609, 1, "Mega Chandelure",  "unova",  51, 1059, True,  1.15),
 )
 
 BY_NORMAL_BUNDLE: dict[str, MegaFormSpec] = {m.normal_bundle: m for m in MEGA_CATALOG}
 
 
 def validate_catalog() -> None:
-    assert len(MEGA_CATALOG) == 63, f"Expected 63 Gen 1-4 Mega forms, got {len(MEGA_CATALOG)}"
+    assert len(MEGA_CATALOG) == 64, f"Expected 64 playable Mega forms, got {len(MEGA_CATALOG)}"
     seen_keys = set()
     seen_bundles = set()
     seen_cabs = set()
@@ -161,6 +163,6 @@ def filter_catalog(batch: str | None = None, forms: list[str] | None = None) -> 
         return [m for m in MEGA_CATALOG if m.in_lumi_delta]
     if batch == "blocked":
         return [m for m in MEGA_CATALOG if not m.in_lumi_delta]
-    if batch in ("kanto", "johto", "hoenn", "sinnoh"):
+    if batch in ("kanto", "johto", "hoenn", "sinnoh", "unova"):
         return [m for m in MEGA_CATALOG if m.region == batch]
-    raise ValueError(f"Unknown batch '{batch}' (choose all|unblocked|blocked|kanto|johto|hoenn|sinnoh)")
+    raise ValueError(f"Unknown batch '{batch}' (choose all|unblocked|blocked|kanto|johto|hoenn|sinnoh|unova)")

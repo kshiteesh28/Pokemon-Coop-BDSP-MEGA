@@ -46,14 +46,14 @@ def encode_array_single_string(arr_id: int, str_id: int, text: str) -> bytes:
 
 
 def find_battle_deps_id(data: bytes, species_prefix: str) -> int:
-    marker = f"pokemons/battle/{species_prefix}_00_00".encode("utf-8")
-    p = data.find(marker)
-    if p == -1:
-        raise ValueError(f"Could not find vanilla battle record {marker.decode()} in Dpr.bin")
-    dp = p + len(marker) + 25 + 8 + 1
-    if dp + 5 > len(data) or data[dp] != 0x09:
-        raise ValueError(f"Expected MemberReference (0x09) for {species_prefix} battle allDependencies at 0x{dp:x}")
-    return struct.unpack_from("<I", data, dp + 1)[0]
+    for suffix in ("_00_00", "_11_00"):
+        marker = f"pokemons/battle/{species_prefix}{suffix}".encode("utf-8")
+        p = data.find(marker)
+        if p != -1:
+            dp = p + len(marker) + 25 + 8 + 1
+            if dp + 5 <= len(data) and data[dp] == 0x09:
+                return struct.unpack_from("<I", data, dp + 1)[0]
+    raise ValueError(f"Could not find vanilla battle record for {species_prefix} (_00_00 or _11_00) in Dpr.bin")
 
 
 def discover_mega_battle_bundles(delta_root: Path) -> list[tuple[str, str, str]]:
