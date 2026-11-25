@@ -1217,6 +1217,48 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     }
 };
 
+// Prevents Mega Absol Z (and all 17 Legends: Z-A Megas) from showing as an Egg icon in Party UI
+// when Luminescent Platinum's UIDatabase.PokemonIcon table has no icon row for their Mega formNo.
+HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
+    static XLSXContent::UIDatabase::SheetPokemonIcon::Object* Callback(
+        Dpr::UI::UIManager::Object* __this,
+        int32_t monsNo, uint16_t formNo, Pml::Sex sex, Pml::PokePara::RareType rareType, bool isEgg) {
+        auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg);
+        if (!isEgg && mega::findMegaByForm(monsNo, formNo) != nullptr) {
+            const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
+                                      (res->fields.AssetName != nullptr &&
+                                       mega::utf16ContainsAscii(res->fields.AssetName, "0000"));
+            if (missingOrEgg) {
+                return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false);
+            }
+        }
+        return res;
+    }
+};
+
+// Fixes Party -> Pokemon Info (Summary) showing Ditto for Mega-Evolved Pokemon:
+// UIModelViewController loads "pokemons/field/<AssetBundleName>", whereas custom Mega bundles live in
+// "pokemons/battle/<AssetBundleName>". Redirect custom Mega bundles to "pokemons/battle/" so Summary
+// displays the actual 3D Mega Evolution model instead of Ditto!
+HOOK_DEFINE_INLINE(UIManager$$GetPokemonAssetbundleName_MegaRedirect) {
+    static void Callback(exl::hook::nx64::InlineCtx* ctx) {
+        auto* monStr = reinterpret_cast<System::String::Object*>(ctx->X[1]);
+        bool isCustomMegaBundle = false;
+        if (monStr != nullptr) {
+            for (const auto& e : mega::kMegaRegistry) {
+                if (!e.hasCustomModel) continue;
+                if ((e.bundleName != nullptr && mega::utf16ContainsAscii(monStr, e.bundleName)) ||
+                    (e.shinyBundleName != nullptr && mega::utf16ContainsAscii(monStr, e.shinyBundleName))) {
+                    isCustomMegaBundle = true;
+                    break;
+                }
+            }
+        }
+        auto* prefix = System::String::Create(isCustomMegaBundle ? "pokemons/battle/" : "pokemons/field/");
+        ctx->X[0] = reinterpret_cast<uint64_t>(System::String::Concat(prefix, monStr));
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
     static System::String::Object* Callback(Dpr::Message::MessageManager::Object* __this,
                                             System::String::Object* fileName,
@@ -1527,6 +1569,8 @@ void installSharedPostInitHooks() {
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
+    UIManager$$GetPokemonIconData::InstallAtOffset(0x017c1250);
+    UIManager$$GetPokemonAssetbundleName_MegaRedirect::InstallAtOffset(0x017c2014);
     // Note: Do NOT hook 0x01ca7100 (ItemIcon::LoadSprite) here — Luminescent Platinum subsdk1
     // already installs HOOK_DEFINE_REPLACE(ItemIconOverride) at 0x01ca7100, which reads
     // ItemData::GetParam(itemId, ICONID) cleanly through our ItemData$$GetParam hook.

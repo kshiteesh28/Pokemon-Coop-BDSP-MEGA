@@ -258,6 +258,9 @@ internal static class Program
 
         float fallbackMinY = 0f;
         float fallbackHeight = MathF.Max((bMaxY - MathF.Min(0f, bMinY)) * 1.25f, 1.0f);
+        // Quadruped species without common bundle whose back flower sits high above skeleton bones
+        if (boneNames.Count == 29 && bMaxY < 0.80f && boneNames.Contains("LEar"))
+            fallbackHeight = 2.00f; // Venusaur (pm0003_00_00)
         return (bonePids, boneNames, computedPoses, fallbackMinY, fallbackHeight, null);
     }
 
@@ -842,9 +845,14 @@ internal static class Program
                 Assert(posedH >= loH && posedH <= hiH, $"{poseName}: Proportionate height (h={posedH:F3}m in [{loH:F2}, {hiH:F2}] vs vanilla {vanHeight:F2}m)");
                 if (nJaw > 0 && nHead > 0)
                 {
-                    var cHead = sumHead / nHead;
-                    var cJaw = sumJaw / nJaw;
-                    Assert(cJaw.Y < cHead.Y, $"{poseName}: Jaw BELOW Head (Jaw.Y={cJaw.Y:F3} < Head.Y={cHead.Y:F3})");
+                    Matrix4x4.Invert(vanBindPoses[headIdx], out var invH);
+                    Matrix4x4.Invert(vanBindPoses[jawIdx], out var invJ);
+                    if (invJ.M42 < invH.M42)
+                    {
+                        var cHead = sumHead / nHead;
+                        var cJaw = sumJaw / nJaw;
+                        Assert(cJaw.Y < cHead.Y, $"{poseName}: Jaw BELOW Head (Jaw.Y={cJaw.Y:F3} < Head.Y={cHead.Y:F3})");
+                    }
                 }
                 if (nTongue > 0 && nHead > 0)
                 {
@@ -1800,35 +1808,84 @@ internal static class Program
         smrBf["m_AABB.m_Extent.y"].AsFloat = 0.5f * (maxY - minY);
         smrBf["m_AABB.m_Extent.z"].AsFloat = 0.5f * (maxZ - minZ);
 
-        var patchedMatPids = new HashSet<long>();
+        // Locate a proven-working non-Eye, non-Mouth Body Material in battleInst to clone for Eye slots
+        // so Eye submeshes get a BRAND-NEW m_PathID completely detached from BDSP's MonoBehaviour & eye01.anim PPtrs!
+        AssetFileInfo? donorBodyMatInfo = null;
+        int matTypeIdx = EnsureTypeTreeIndex((int)AssetClassID.Material);
         var smrMats = smrBf["m_Materials.Array"].Children;
+        for (int s = 0; s < smrMats.Count; s++)
+        {
+            var mi = f.GetAssetInfo(smrMats[s]["m_PathID"].AsLong);
+            if (mi == null) continue;
+            var mbTmp = am.GetBaseField(battleInst, mi);
+            string nm = mbTmp["m_Name"].AsString;
+            if (!nm.Contains("Eye", StringComparison.OrdinalIgnoreCase) && !nm.Contains("Mouth", StringComparison.OrdinalIgnoreCase))
+            {
+                donorBodyMatInfo = mi;
+                break;
+            }
+        }
+
+        var patchedMatPids = new HashSet<long>();
         for (int matSlot = 0; matSlot < smrMats.Count; matSlot++)
         {
-            long matPid = smrMats[matSlot]["m_PathID"].AsLong;
-            if (!patchedMatPids.Add(matPid)) continue;
-            var matInfo = f.GetAssetInfo(matPid);
-            if (matInfo == null) continue;
-            var mb = am.GetBaseField(battleInst, matInfo);
-            string mName = mb["m_Name"].AsString;
+            long origMatPid = smrMats[matSlot]["m_PathID"].AsLong;
+            var origMatInfo = f.GetAssetInfo(origMatPid);
+            if (origMatInfo == null) continue;
+            var origMb = am.GetBaseField(battleInst, origMatInfo);
+            string mName = origMb["m_Name"].AsString;
             bool isEyeMat = mName.Contains("Eye", StringComparison.OrdinalIgnoreCase);
-            // Rename Eye materials to -Iris{slot} so BDSP's runtime eye-sheet UV animator
-            // never slides our 1x1 Legends: Z-A eye texture off the iris onto blank sclera!
-            mb["m_Name"].AsString = isEyeMat ? $"{formId}-Iris{matSlot}" : mName.Replace(baseFormId, formId);
+            bool isMouthMat = mName.Contains("Mouth", StringComparison.OrdinalIgnoreCase);
+
+            // For non-Eye materials, skip if this shared m_PathID was already patched
+            if (!isEyeMat && !patchedMatPids.Add(origMatPid)) continue;
+
+            // Preserve original _Col0Tex scale.x so UVs divided by sx_van stay exact
+            float origScaleX = 2f;
+            foreach (var te in origMb["m_SavedProperties.m_TexEnvs.Array"].Children)
+            {
+                string pn = te["first"].AsString;
+                if (pn == "_Col0Tex" || pn == "_BaseMap" || pn == "_MainTex")
+                {
+                    origScaleX = te["second.m_Scale.x"].AsFloat;
+                    if (origScaleX < 0.1f) origScaleX = 1f;
+                    break;
+                }
+            }
+
+            // For Eye materials: CLONE donorBodyMatInfo into a BRAND-NEW Material asset with a BRAND-NEW m_PathID!
+            // This guarantees ZERO MonoBehaviour or eye01.anim PPtr references can ever overwrite _Col0Tex_ST,
+            // _Layer1OverLerpValue, or alpha at runtime on Nintendo Switch, while inheriting BodyA's proven shader/colors.
+            AssetTypeValueField mb = (isEyeMat && donorBodyMatInfo != null)
+                ? am.GetBaseField(battleInst, donorBodyMatInfo)
+                : origMb;
+
+            bool hasCustomEmi = texPids.ContainsKey($"Sub{matSlot}_emi")
+                || (mName.Contains("BodyB") && texPids.ContainsKey("BodyB_emi"))
+                || (mName.Contains("Body") && texPids.ContainsKey("Body_emi"));
 
             if (isEyeMat)
+                mb["m_Name"].AsString = $"{formId}-Iris{matSlot}";
+            else if (isMouthMat)
+                mb["m_Name"].AsString = $"{formId}-Part{matSlot}";
+            else
+                mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
+
+            // Clean ALL replaced BodySkin materials: strip vanilla BDSP UV-mapped Layer1 & mask shaders
+            string kw = mb["m_ShaderKeywords"].AsString;
+            var cleanKw = kw.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(k => k != "USE_LAYER1" && k != "USE_RIM_MASK_TEX" && k != "USE_SPECULAR_MASK_TEX"
+                    && k != "USE_SPHEREMASK_TEX" && (hasCustomEmi || k != "USE_EMISSION_MASK_TEX"));
+            mb["m_ShaderKeywords"].AsString = string.Join(" ", cleanKw);
+            foreach (var fl in mb["m_SavedProperties.m_Floats.Array"].Children)
             {
-                // Strip Layer1 (vanilla eyelid/iris overlay) and vanilla eye sprite-sheet masks
-                string kw = mb["m_ShaderKeywords"].AsString;
-                var cleanKw = kw.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Where(k => k != "USE_LAYER1" && k != "USE_RIM_MASK_TEX" && k != "USE_SPECULAR_MASK_TEX" && k != "USE_SPHEREMASK_TEX");
-                mb["m_ShaderKeywords"].AsString = string.Join(" ", cleanKw);
-                foreach (var fl in mb["m_SavedProperties.m_Floats.Array"].Children)
-                {
-                    string fk = fl["first"].AsString;
-                    if (fk == "_Layer1Enable" || fk == "_Layer1OverLerpValue" || fk == "_RimMaskEnable" ||
-                        fk == "_SpecularMaskEnable" || fk == "_SphereMaskEnable" || fk == "_EmissionMaskUse")
-                        fl["second"].AsFloat = 0f;
-                }
+                string fk = fl["first"].AsString;
+                if (fk == "_Layer1Enable" || fk == "_Layer1OverLerpValue" || fk == "_RimMaskEnable" ||
+                    fk == "_SpecularMaskEnable" || fk == "_SphereMaskEnable" ||
+                    (!hasCustomEmi && fk == "_EmissionMaskUse"))
+                    fl["second"].AsFloat = 0f;
+                if (isEyeMat && fk == "_CullMode")
+                    fl["second"].AsFloat = 0f; // Double-sided safety net for Eye submeshes
             }
 
             foreach (var texEntry in mb["m_SavedProperties.m_TexEnvs.Array"].Children)
@@ -1837,16 +1894,23 @@ internal static class Program
                 var tex = texEntry["second.m_Texture"];
                 bool isCol = prop == "_Col0Tex" || prop == "_BaseMap" || prop == "_MainTex";
                 bool isEmi = prop == "_EmissionMaskTex" || prop == "_EmissionMap";
-                if (isEyeMat && !isCol)
+                if (!isCol && !(isEmi && hasCustomEmi))
                 {
-                    // Clear vanilla _L1Col0Tex / _AmbientTex / _NormalMapTex (2x4/4x4 eye sheets)
                     tex["m_FileID"].AsInt = 0;
                     tex["m_PathID"].AsLong = 0;
                     continue;
                 }
                 if (isCol)
                 {
-                    if (texPids.TryGetValue($"Sub{matSlot}_col", out long pSub)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pSub; Console.WriteLine($"  Patched [{matSlot}] {mName}.{prop} -> Sub{matSlot}_col"); }
+                    if (isEyeMat)
+                    {
+                        texEntry["second.m_Scale.x"].AsFloat = origScaleX;
+                        texEntry["second.m_Scale.y"].AsFloat = 1f;
+                        texEntry["second.m_Offset.x"].AsFloat = 0f;
+                        texEntry["second.m_Offset.y"].AsFloat = 0f;
+                    }
+                    if (texPids.TryGetValue($"Sub{matSlot}_col", out long pSub)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pSub; Console.WriteLine($"  Patched [{matSlot}] {mb["m_Name"].AsString}.{prop} -> Sub{matSlot}_col"); }
+                    else if (isEyeMat && texPids.TryGetValue("Eye_col", out long pe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pe; Console.WriteLine($"  Patched [{matSlot}] {mb["m_Name"].AsString}.{prop} -> Eye_col (NEW BodyA-cloned PathID)"); }
                     else if (mName.Contains("Body00") && texPids.TryGetValue("Body00_col", out long p00)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p00; Console.WriteLine($"  Patched {mName}.{prop} -> Body00_col"); }
                     else if (mName.Contains("Body01") && texPids.TryGetValue("Body01_col", out long p01)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p01; Console.WriteLine($"  Patched {mName}.{prop} -> Body01_col"); }
                     else if (mName.Contains("Body02") && texPids.TryGetValue("Body02_col", out long p02)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = p02; Console.WriteLine($"  Patched {mName}.{prop} -> Body02_col"); }
@@ -1854,7 +1918,6 @@ internal static class Program
                     else if (mName.Contains("BodyA") && texPids.TryGetValue("BodyA_col", out long pa)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pa; Console.WriteLine($"  Patched {mName}.{prop} -> BodyA_col"); }
                     else if (mName.Contains("BodyB") && texPids.TryGetValue("BodyB_col", out long pb)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pb; Console.WriteLine($"  Patched {mName}.{prop} -> BodyB_col"); }
                     else if (mName.Contains("Body") && texPids.TryGetValue("Body_col", out long pbody)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pbody; Console.WriteLine($"  Patched {mName}.{prop} -> Body_col"); }
-                    else if (mName.Contains("Eye") && texPids.TryGetValue("Eye_col", out long pe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pe; Console.WriteLine($"  Patched {mName}.{prop} -> Eye_col (Layer1 cleared)"); }
                 }
                 else if (isEmi)
                 {
@@ -1863,7 +1926,20 @@ internal static class Program
                     else if (mName.Contains("Body") && texPids.TryGetValue("Body_emi", out long pme)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pme; Console.WriteLine($"  Patched {mName}.{prop} -> Body_emi"); }
                 }
             }
-            matInfo.SetNewData(mb);
+
+            if (isEyeMat && donorBodyMatInfo != null)
+            {
+                long newMatPid = nextPid++;
+                var newMatInfo = new AssetFileInfo { PathId = newMatPid, TypeId = (int)AssetClassID.Material, TypeIdOrIndex = matTypeIdx };
+                newMatInfo.SetNewData(mb);
+                f.Metadata.AddAssetInfo(newMatInfo);
+                smrMats[matSlot]["m_FileID"].AsInt = 0;
+                smrMats[matSlot]["m_PathID"].AsLong = newMatPid;
+            }
+            else
+            {
+                origMatInfo.SetNewData(mb);
+            }
         }
         smrInfo.SetNewData(smrBf);
 

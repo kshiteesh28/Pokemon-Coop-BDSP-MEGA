@@ -448,8 +448,8 @@ def build_universal_bone_remapper(
     semantic_candidates: dict[str, tuple[str, ...]] = {
         "waist": ("Hips", "Waist", "Hip", "Pelvis", "Spine1"),
         "spine_01": ("Spine1", "Spine", "Waist", "Hips"),
-        "spine_02": ("Spine2", "Spine1", "Chest", "Spine"),
-        "spine_03": ("Spine3", "Spine2", "Chest", "Spine1"),
+        "spine_02": ("Spine2", "Spine1", "Chest", "Spine", "Waist", "Hips"),
+        "spine_03": ("Spine3", "Spine2", "Chest", "Spine1", "Waist", "Hips"),
         "neck_01": ("Neck1", "Neck", "Spine2"),
         "neck_02": ("Neck2", "Neck1", "Neck"),
         "neck_03": ("Neck3", "Neck2", "Neck1", "Head"),
@@ -871,6 +871,36 @@ def render_textured_qa(
 # Main Form Builder
 # ---------------------------------------------------------------------------
 
+SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
+    # Mega Charizard Y: uses native BDSP animated FireCore/FireMask tail flame
+    "pm0006_52_00": {"pm0006_52_00_fire_mesh_shape"},
+    # Mega Blastoise: keep extended mega cannons, skip retracted closed covers
+    "pm0009_51_00": {
+        "pm0009_51_00_closed_mesh_shape",
+        "pm0009_51_00_left_armclosed_mesh_shape",
+        "pm0009_51_00_right_armclosed_mesh_shape",
+    },
+    # Mega Raichu X: keep primary tail_a, skip swappable tail_b/tail_c duplicates
+    "pm0026_51_00": {"pm0026_51_00_tail_b_mesh_shape", "pm0026_51_00_tail_c_mesh_shape"},
+    # Mega Raichu Y: keep primary rip_a, skip swappable rip_b/rip_c duplicates
+    "pm0026_52_00": {"pm0026_52_00_rip_b_mesh_shape", "pm0026_52_00_rip_c_mesh_shape"},
+    # Mega Victreebel: keep default _a face, skip alternate _b face
+    "pm0071_51_00": {
+        "pm0071_51_00_mouth_b_mesh_shape",
+        "pm0071_51_00_eye_b_mesh_shape",
+        "pm0071_51_00_teeth_b_mesh_shape",
+    },
+    # Mega Slowbro: keep open eye_a + Shellder eye_c + arms, skip closed eye_b/eyelid/futa
+    "pm0080_51_00": {
+        "pm0080_51_00_eye_b_mesh_shape",
+        "pm0080_51_00_eyelid_mesh_shape",
+        "pm0080_51_00_futa_mesh_shape",
+    },
+    # Mega Kangaskhan: skip closed baby eyelidb overlay
+    "pm0115_51_00": {"pm0115_51_00_eyelidb_mesh_shape"},
+}
+
+
 def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) -> None:
     species = spec.species_prefix
     form_id = spec.shiny_bundle if is_shiny else spec.normal_bundle
@@ -891,7 +921,8 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
     nodes, rig_to_node = parse_trskl(files["trskl"])
     rig_map, fallback_bone = build_universal_bone_remapper(van_bones, nodes, rig_to_node)
 
-    shapes = parse_trmsh_and_trmbf(files["trmsh"], files["trmbf"])
+    skip_shapes = SKIP_SHAPES_BY_PACK.get(spec.za_pack, set())
+    shapes = [s for s in parse_trmsh_and_trmbf(files["trmsh"], files["trmbf"]) if s["name"] not in skip_shapes]
     trmtr_path = files["rare_trmtr"] if is_shiny else files["norm_trmtr"]
     trmtr = parse_trmtr(trmtr_path)
     bntx_idx = index_bntx_dir(pack_dir)
@@ -905,10 +936,12 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
     za_to_slot, slot_to_zamats, slot_scale_x = plan_material_slots(used_mats, van_materials)
 
-    # Compute uniform scale & grounding from non-VFX shapes
+    # Compute uniform scale & grounding from core body shapes (ignore VFX & outlier vine shapes)
     body_ys = []
     for sh in shapes:
         if any(m[0].lower().startswith("eff_") for m in sh["mats"]):
+            continue
+        if spec.za_pack == "pm0071_51_00" and "leaf" in sh["name"].lower():
             continue
         body_ys.extend(sh["verts"][:, 1].tolist())
     za_min_y, za_max_y = min(body_ys), max(body_ys)
@@ -964,6 +997,16 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
             sx_van = info["van_scale_x"]
 
             slice_idx = sh["indices"][poly_off : poly_off + poly_cnt]
+            is_victreebel_leaf = (spec.za_pack == "pm0071_51_00" and "leaf" in sh["name"].lower())
+            if is_victreebel_leaf:
+                kept = []
+                for t in range(0, len(slice_idx), 3):
+                    ia, ib, ic = int(slice_idx[t]), int(slice_idx[t + 1]), int(slice_idx[t + 2])
+                    if min(sh["verts"][ia][1], sh["verts"][ib][1], sh["verts"][ic][1]) > 3.9:
+                        kept.extend([ia, ib, ic])
+                slice_idx = np.array(kept, dtype=np.int32)
+                if len(slice_idx) == 0:
+                    continue
             used = np.unique(slice_idx)
             local_to_global: dict[int, int] = {}
             remapped_i, remapped_w = remap_vertex_weights(sh["b_idx"][used], sh["b_w"][used], rig_map, fallback_bone)
@@ -1000,11 +1043,20 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
                 all_w.append(remapped_w[loc_pos])
                 all_i.append(remapped_i[loc_pos])
 
+            is_victreebel_leaf = (spec.za_pack == "pm0071_51_00" and "leaf" in sh["name"].lower())
+            if is_victreebel_leaf:
+                # Reposition Mega Victreebel top leaf crown onto head and drop the 12m unposed straight vine stem
+                for orig_v, g_idx in local_to_global.items():
+                    if sh["verts"][orig_v][1] > 3.9:
+                        all_verts[g_idx][1] -= 1.35 * scale
             s_out = submeshes[sub_idx]
             for t in range(0, len(slice_idx), 3):
-                a = local_to_global[int(slice_idx[t])]
-                b = local_to_global[int(slice_idx[t + 1])]
-                c = local_to_global[int(slice_idx[t + 2])]
+                ia, ib, ic = int(slice_idx[t]), int(slice_idx[t + 1]), int(slice_idx[t + 2])
+                if is_victreebel_leaf and min(sh["verts"][ia][1], sh["verts"][ib][1], sh["verts"][ic][1]) <= 3.9:
+                    continue
+                a = local_to_global[ia]
+                b = local_to_global[ib]
+                c = local_to_global[ic]
                 s_out.extend([a, c, b])
 
     mesh_json = out_dir / f"{form_id}_mesh.json"
