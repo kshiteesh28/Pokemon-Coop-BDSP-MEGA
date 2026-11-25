@@ -47,6 +47,7 @@
 #include "externals/Pml/Item/ItemManager.h"
 #include "externals/Pml/Personal/PersonalSystem.h"
 #include "externals/Pml/PokeParty.h"
+#include "externals/SmartPoint/AssetAssistant/AssetManager.h"
 #include "externals/System/Action.h"
 #include "externals/System/String.h"
 #include "externals/UnityEngine/Color.h"
@@ -663,7 +664,7 @@ inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) 
     }
     const int32_t hayLen = str->fields.m_stringLength;
     const int32_t needleLen = static_cast<int32_t>(std::strlen(needle));
-    if (needleLen == 0 || hayLen < needleLen) {
+    if (needleLen == 0 || hayLen < needleLen || hayLen > 1024) {
         return false;
     }
     const uint16_t* chars = reinterpret_cast<const uint16_t*>(&str->fields.m_firstChar);
@@ -684,6 +685,64 @@ inline bool utf16ContainsAscii(System::String::Object* str, const char* needle) 
         }
     }
     return false;
+}
+
+inline bool utf16EqualsAsciiRange(const uint16_t* chars, int32_t len, const char* ascii) {
+    if (chars == nullptr || ascii == nullptr) {
+        return false;
+    }
+    const int32_t asciiLen = static_cast<int32_t>(std::strlen(ascii));
+    if (len != asciiLen) {
+        return false;
+    }
+    for (int32_t i = 0; i < len; ++i) {
+        uint16_t hc = chars[i];
+        if (hc >= 'A' && hc <= 'Z') hc = static_cast<uint16_t>(hc + ('a' - 'A'));
+        unsigned char nc = static_cast<unsigned char>(ascii[i]);
+        if (nc >= 'A' && nc <= 'Z') nc = static_cast<unsigned char>(nc + ('a' - 'A'));
+        if (hc != static_cast<uint16_t>(nc)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Fast, zero-allocation redirect for UIModelViewController (Party 3D preview & Summary):
+// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/battle/<customMegaBundle>"
+// cleanly at AssetManager entry points without fragile mid-function inline hooks.
+inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String::Object* bundlePath) {
+    if (bundlePath == nullptr) {
+        return bundlePath;
+    }
+    constexpr const char* kFieldPrefix = "pokemons/field/";
+    constexpr int32_t kPrefixLen = 15;
+    const int32_t len = bundlePath->fields.m_stringLength;
+    if (len <= kPrefixLen || len > 128) {
+        return bundlePath;
+    }
+    const uint16_t* chars = reinterpret_cast<const uint16_t*>(&bundlePath->fields.m_firstChar);
+    if (!utf16EqualsAsciiRange(chars, kPrefixLen, kFieldPrefix)) {
+        return bundlePath;
+    }
+    const uint16_t* suffix = chars + kPrefixLen;
+    const int32_t suffixLen = len - kPrefixLen;
+    for (const auto& e : kMegaRegistry) {
+        if (!e.hasCustomModel) {
+            continue;
+        }
+        const char* matched = nullptr;
+        if (e.bundleName != nullptr && utf16EqualsAsciiRange(suffix, suffixLen, e.bundleName)) {
+            matched = e.bundleName;
+        } else if (e.shinyBundleName != nullptr && utf16EqualsAsciiRange(suffix, suffixLen, e.shinyBundleName)) {
+            matched = e.shinyBundleName;
+        }
+        if (matched != nullptr) {
+            char battlePath[64];
+            std::snprintf(battlePath, sizeof(battlePath), "pokemons/battle/%s", matched);
+            return System::String::Create(battlePath);
+        }
+    }
+    return bundlePath;
 }
 
 // Parses the exact trailing numeric item ID from BDSP message labels (e.g. "itemname_0622" -> 622).
@@ -1222,40 +1281,38 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
 HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
     static XLSXContent::UIDatabase::SheetPokemonIcon::Object* Callback(
         Dpr::UI::UIManager::Object* __this,
-        int32_t monsNo, uint16_t formNo, Pml::Sex sex, Pml::PokePara::RareType rareType, bool isEgg) {
-        auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg);
-        if (!isEgg && mega::findMegaByForm(monsNo, formNo) != nullptr) {
+        int32_t monsNo, uint16_t formNo, Pml::Sex sex, Pml::PokePara::RareType rareType, bool isEgg,
+        const void* methodInfo) {
+        auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
+        if (__this != nullptr && !isEgg && mega::findMegaByForm(monsNo, formNo) != nullptr) {
             const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
                                       (res->fields.AssetName != nullptr &&
                                        mega::utf16ContainsAscii(res->fields.AssetName, "0000"));
             if (missingOrEgg) {
-                return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false);
+                return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
             }
         }
         return res;
     }
 };
 
-// Fixes Party -> Pokemon Info (Summary) showing Ditto for Mega-Evolved Pokemon:
-// UIModelViewController loads "pokemons/field/<AssetBundleName>", whereas custom Mega bundles live in
-// "pokemons/battle/<AssetBundleName>". Redirect custom Mega bundles to "pokemons/battle/" so Summary
-// displays the actual 3D Mega Evolution model instead of Ditto!
-HOOK_DEFINE_INLINE(UIManager$$GetPokemonAssetbundleName_MegaRedirect) {
-    static void Callback(exl::hook::nx64::InlineCtx* ctx) {
-        auto* monStr = reinterpret_cast<System::String::Object*>(ctx->X[1]);
-        bool isCustomMegaBundle = false;
-        if (monStr != nullptr) {
-            for (const auto& e : mega::kMegaRegistry) {
-                if (!e.hasCustomModel) continue;
-                if ((e.bundleName != nullptr && mega::utf16ContainsAscii(monStr, e.bundleName)) ||
-                    (e.shinyBundleName != nullptr && mega::utf16ContainsAscii(monStr, e.shinyBundleName))) {
-                    isCustomMegaBundle = true;
-                    break;
-                }
-            }
-        }
-        auto* prefix = System::String::Create(isCustomMegaBundle ? "pokemons/battle/" : "pokemons/field/");
-        ctx->X[0] = reinterpret_cast<uint64_t>(System::String::Concat(prefix, monStr));
+// Fixes Party 3D preview & Summary showing Ditto for Mega-Evolved Pokemon WITHOUT using
+// HOOK_DEFINE_INLINE (whose exlaunch inline_impl.cpp trampoline+4 skip & unsaved NEON regs
+// crash on Switch ASLR when subsdk2 is >128MB from String::Concat).
+HOOK_DEFINE_TRAMPOLINE(AssetManager$$AppendAssetBundleRequest) {
+    static SmartPoint::AssetAssistant::AssetRequestOperation::Object* Callback(
+        System::String::Object* assetBundleName, bool loadAllAssets, void* callback,
+        System::String::Array* variants, const void* methodInfo) {
+        auto* resolved = mega::redirectCustomMegaFieldBundlePath(assetBundleName);
+        return Orig(resolved, loadAllAssets, callback, variants, methodInfo);
+    }
+};
+
+// Paired UnloadAssetBundle redirect so AssetBundle refcounts stay balanced (zero leaks).
+HOOK_DEFINE_TRAMPOLINE(AssetManager$$UnloadAssetBundle) {
+    static int32_t Callback(System::String::Object* assetBundleName, const void* methodInfo) {
+        auto* resolved = mega::redirectCustomMegaFieldBundlePath(assetBundleName);
+        return Orig(resolved, methodInfo);
     }
 };
 
@@ -1570,7 +1627,8 @@ void installSharedPostInitHooks() {
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     UIManager$$GetPokemonIconData::InstallAtOffset(0x017c1250);
-    UIManager$$GetPokemonAssetbundleName_MegaRedirect::InstallAtOffset(0x017c2014);
+    AssetManager$$AppendAssetBundleRequest::InstallAtOffset(0x022dbfb0);
+    AssetManager$$UnloadAssetBundle::InstallAtOffset(0x022dbde0);
     // Note: Do NOT hook 0x01ca7100 (ItemIcon::LoadSprite) here — Luminescent Platinum subsdk1
     // already installs HOOK_DEFINE_REPLACE(ItemIconOverride) at 0x01ca7100, which reads
     // ItemData::GetParam(itemId, ICONID) cleanly through our ItemData$$GetParam hook.
