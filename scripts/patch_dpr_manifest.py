@@ -104,9 +104,12 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
 
     entries = [
         ("pokemons/battle/pm0006_01_00", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", charizard_deps_id),
+        ("pokemons/battle/pm0006_01_10", "assets/pokemons/battle/pm0006/pm0006_01_10.prefab", charizard_deps_id),
         ("pokemons/battle/pm0006_02_00", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", charizard_deps_id),
         ("pokemons/battle/pm0359_01_00", "assets/pokemons/battle/pm0359/pm0359_01_00.prefab", absol_deps_id),
+        ("pokemons/battle/pm0359_01_10", "assets/pokemons/battle/pm0359/pm0359_01_10.prefab", absol_deps_id),
         ("pokemons/battle/pm0359_02_00", "assets/pokemons/battle/pm0359/pm0359_02_00.prefab", absol_deps_id),
+        ("pokemons/battle/pm0359_02_10", "assets/pokemons/battle/pm0359/pm0359_02_10.prefab", absol_deps_id),
     ]
 
     # Guard against AssetBundleDownloadManifest.BuildLookupTables() Dictionary.Add duplicate-key crashes

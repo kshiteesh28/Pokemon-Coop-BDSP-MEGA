@@ -250,6 +250,7 @@ struct MegaSpeciesEntry {
     uint8_t primaryType, secondaryType;
     uint16_t weight;
     const char* bundleName;
+    const char* shinyBundleName;
     const char* bannerReady;
     const char* bannerArmed;
     const char* reactMessage;
@@ -263,7 +264,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     {
         kCharizardSpecies, kMegaXForm, kCharizarditeX, kFireStone,
         78, 130, 111, 130, 85, 100, kToughClaws, kTypeFire, kTypeDragon, 1105,
-        "pm0006_01_00", "[R] MEGA EVOLVE X", "MEGA X ACTIVE",
+        "pm0006_01_00", "pm0006_01_10", "[R] MEGA EVOLVE X", "MEGA X ACTIVE",
         "Charizard's Charizardite X is reacting to your Mega Ring!",
         "Charizard has Mega Evolved into Mega Charizard X!",
         "660", "Charizardite X",
@@ -272,7 +273,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     {
         kCharizardSpecies, kMegaYForm, kCharizarditeY, kFireStone,
         78, 104, 78, 159, 115, 100, kDrought, kTypeFire, kTypeFlying, 1005,
-        "pm0006_02_00", "[R] MEGA EVOLVE Y", "MEGA Y ACTIVE",
+        "pm0006_02_00", "pm0006_02_00", "[R] MEGA EVOLVE Y", "MEGA Y ACTIVE",
         "Charizard's Charizardite Y is reacting to your Mega Ring!",
         "Charizard has Mega Evolved into Mega Charizard Y!",
         "678", "Charizardite Y",
@@ -281,7 +282,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     {
         kAbsolSpecies, kMegaAbsolForm, kAbsolite, kDuskStone,
         65, 150, 60, 115, 60, 115, kMagicBounce, kTypeDark, kTypeDark, 490,
-        "pm0359_01_00", "[R] MEGA EVOLVE", "MEGA ABSOL ACTIVE",
+        "pm0359_01_00", "pm0359_01_10", "[R] MEGA EVOLVE", "MEGA ABSOL ACTIVE",
         "Absol's Absolite is reacting to your Mega Ring!",
         "Absol has Mega Evolved into Mega Absol!",
         "677", "Absolite",
@@ -290,7 +291,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     {
         kAbsolSpecies, kMegaAbsolZForm, kAbsoliteZ, kDuskStone,
         65, 154, 60, 75, 60, 151, kSharpness, kTypeDark, kTypeGhost, 470,
-        "pm0359_02_00", "[R] MEGA EVOLVE Z", "MEGA ABSOL Z ACTIVE",
+        "pm0359_02_00", "pm0359_02_10", "[R] MEGA EVOLVE Z", "MEGA ABSOL Z ACTIVE",
         "Absol's Absolite Z is reacting to your Mega Ring!",
         "Absol has Mega Evolved into Mega Absol Z!",
         "622", "Absolite Z",
@@ -1011,14 +1012,24 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         if (mega::gActiveMegaForm > 0 && mega::isBattleEnded()) {
             mega::revertMegaFormInParty();
         }
-        if (prmID == Pml::Item::ItemData::PrmID::INACTIVE &&
-            (mega::isMegaStone(itemno) || mega::isMegaKeyItem(itemno))) {
+        const auto* stone = mega::findMegaStoneCatalog(itemno);
+        const bool isKey = mega::isMegaKeyItem(itemno);
+        if (prmID == Pml::Item::ItemData::PrmID::INACTIVE && (stone != nullptr || isKey)) {
             return 0;
         }
         if (prmID == Pml::Item::ItemData::PrmID::ICONID) {
-            if (const auto* stone = mega::findMegaStoneCatalog(itemno);
-                stone != nullptr && !mega::isNativeGen6MegaStone(itemno)) {
+            if (stone != nullptr) {
+                if (mega::isNativeGen6MegaStone(itemno)) {
+                    const int32_t nativeIcon = Orig(itemno, prmID);
+                    if (nativeIcon > 0) {
+                        return nativeIcon;
+                    }
+                }
                 return Orig(stone->fallbackIconId, prmID);
+            }
+            if (isKey) {
+                const int32_t nativeIcon = Orig(itemno, prmID);
+                return (nativeIcon > 0) ? nativeIcon : Orig(mega::kOddKeystone, prmID);
             }
         }
         return Orig(itemno, prmID);
@@ -1207,72 +1218,15 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
                                 sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields));
                     clone->fields.FormNo = formNo;
                     clone->fields.Rare = isRare;
-                    clone->fields.AssetBundleName = System::String::Create(md->bundleName);
+                    const char* targetBundle = (isRare && md->shinyBundleName != nullptr)
+                                                   ? md->shinyBundleName
+                                                   : md->bundleName;
+                    clone->fields.AssetBundleName = System::String::Create(targetBundle);
                     return clone;
                 }
             }
         }
         return Orig(monsNo, formNo, sex, isRare, isEgg, methodInfo);
-    }
-};
-
-HOOK_DEFINE_TRAMPOLINE(ItemIcon$$LoadSprite) {
-    static void Callback(int32_t itemId, System::Action::Object* onLoadedCallback, bool isUnload, bool isLarge) {
-        if (mega::isMegaStone(itemId) || mega::isMegaKeyItem(itemId)) {
-            system_load_typeinfo(0x56c0);
-            Dpr::UI::UIManager::getClass()->initIfNeeded();
-            auto* uiMgr = Dpr::UI::UIManager::get_Instance();
-            if (uiMgr != nullptr) {
-                auto tryLoad = [&](int32_t iconId, bool large) -> UnityEngine::Sprite::Object* {
-                    if (iconId <= 0 || iconId > 9999) {
-                        return nullptr;
-                    }
-                    char buf[16];
-                    buf[0] = 'i'; buf[1] = 't'; buf[2] = 'e'; buf[3] = 'm'; buf[4] = '_';
-                    buf[5] = static_cast<char>('0' + ((iconId / 1000) % 10));
-                    buf[6] = static_cast<char>('0' + ((iconId / 100) % 10));
-                    buf[7] = static_cast<char>('0' + ((iconId / 10) % 10));
-                    buf[8] = static_cast<char>('0' + (iconId % 10));
-                    if (large) {
-                        buf[9] = '_'; buf[10] = 'L'; buf[11] = '\0';
-                    } else {
-                        buf[9] = '\0';
-                    }
-                    return uiMgr->GetAtlasSprite(SpriteAtlasID::TEXTUREMASS, System::String::Create(buf));
-                };
-
-                UnityEngine::Sprite::Object* spr = nullptr;
-                // 1) Try native/custom item sprite (large first if requested, then standard)
-                if (isLarge) spr = tryLoad(itemId, true);
-                if (spr == nullptr) spr = tryLoad(itemId, false);
-
-                // 2) Try type-matched evolution stone / keystone fallback (by resolved ICONID, then raw ID)
-                if (spr == nullptr) {
-                    int32_t fallbackItem = mega::kOddKeystone;
-                    if (const auto* stone = mega::findMegaStoneCatalog(itemId); stone != nullptr) {
-                        fallbackItem = stone->fallbackIconId;
-                    }
-                    int32_t fbIcon = Pml::Item::ItemData::GetParam(
-                        static_cast<uint16_t>(fallbackItem), Pml::Item::ItemData::PrmID::ICONID);
-                    if (fbIcon <= 0) fbIcon = fallbackItem;
-                    if (isLarge) spr = tryLoad(fbIcon, true);
-                    if (spr == nullptr) spr = tryLoad(fbIcon, false);
-                    if (spr == nullptr && fbIcon != fallbackItem) spr = tryLoad(fallbackItem, false);
-                }
-
-                // 3) Guaranteed-present Fire Stone sprite fallback
-                if (spr == nullptr && isLarge) spr = tryLoad(mega::kFireStone, true);
-                if (spr == nullptr) spr = tryLoad(mega::kFireStone, false);
-
-                if (spr != nullptr) {
-                    if (onLoadedCallback != nullptr) {
-                        onLoadedCallback->Invoke(reinterpret_cast<Il2CppObject*>(spr));
-                    }
-                    return;
-                }
-            }
-        }
-        Orig(itemId, onLoadedCallback, isUnload, isLarge);
     }
 };
 
@@ -1577,7 +1531,9 @@ void installSharedPostInitHooks() {
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
-    ItemIcon$$LoadSprite::InstallAtOffset(0x01ca7100);
+    // Note: Do NOT hook 0x01ca7100 (ItemIcon::LoadSprite) here — Luminescent Platinum subsdk1
+    // already installs HOOK_DEFINE_REPLACE(ItemIconOverride) at 0x01ca7100, which reads
+    // ItemData::GetParam(itemId, ICONID) cleanly through our ItemData$$GetParam hook.
     MessageManager$$GetSimpleMessage::InstallAtOffset(0x0210d000);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
     UIText$$SetupMessage_Label::InstallAtOffset(0x01dd18d0);

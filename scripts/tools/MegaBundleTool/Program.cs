@@ -1754,6 +1754,47 @@ internal static class Program
         }
         smrInfo.SetNewData(smrBf);
 
+        // For Mega Charizard X (Normal pm0006_01_00 & Shiny pm0006_01_10), tint vanilla animated
+        // FireCore & FireMask tail flame materials to Electric Cyan-Blue!
+        if (formId.StartsWith("pm0006_01_", StringComparison.Ordinal))
+        {
+            foreach (var si in f.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
+            {
+                if (si.PathId == smrInfo.PathId) continue;
+                var sb = am.GetBaseField(battleInst, si);
+                var go = am.GetBaseField(battleInst, f.GetAssetInfo(sb["m_GameObject.m_PathID"].AsLong)!);
+                string sName = go["m_Name"].AsString;
+                if (!sName.Contains("Fire", StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var mRef in sb["m_Materials.Array"].Children)
+                {
+                    long matPid = mRef["m_PathID"].AsLong;
+                    if (!patchedMatPids.Add(matPid)) continue;
+                    var matInfo = f.GetAssetInfo(matPid);
+                    if (matInfo == null) continue;
+                    var mb = am.GetBaseField(battleInst, matInfo);
+                    string mName = mb["m_Name"].AsString;
+                    mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
+                    foreach (var col in mb["m_SavedProperties.m_Colors.Array"].Children)
+                    {
+                        string cn = col["first"].AsString;
+                        var cv = col["second"];
+                        float r = cv["r"].AsFloat;
+                        float g = cv["g"].AsFloat;
+                        float b = cv["b"].AsFloat;
+                        float lum = MathF.Max(r, MathF.Max(g, b));
+                        if (r > b + 0.05f && lum > 0.05f)
+                        {
+                            cv["r"].AsFloat = MathF.Min(0.18f * lum, 1f);
+                            cv["g"].AsFloat = MathF.Min(0.76f * lum, 1f);
+                            cv["b"].AsFloat = MathF.Min(1.00f * lum, 1f);
+                            Console.WriteLine($"  Tinted {mName}.{cn} -> Electric Blue ({cv["r"].AsFloat:F2},{cv["g"].AsFloat:F2},{cv["b"].AsFloat:F2})");
+                        }
+                    }
+                    matInfo.SetNewData(mb);
+                }
+            }
+        }
+
         string tmp = outBundle + ".tmp";
         string tmpLz4 = outBundle + ".lz4";
         battleBun.file.BlockAndDirInfo.DirectoryInfos[0].SetNewData(f);
