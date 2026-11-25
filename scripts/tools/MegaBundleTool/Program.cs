@@ -40,6 +40,7 @@ internal static class Program
             "dump-vanilla-species" => DumpVanillaSpecies(args.Skip(1).ToArray()),
             "build-mega-x-bundle" => BuildMegaXBundle(args.Skip(1).ToArray()),
             "build-species-bundle" => BuildSpeciesBundle(args.Skip(1).ToArray()),
+            "inspect-mats" => InspectMats(args.Skip(1).ToArray()),
             _ => throw new ArgumentException($"Unknown command: {args[0]}")
         };
     }
@@ -1809,13 +1810,40 @@ internal static class Program
             if (matInfo == null) continue;
             var mb = am.GetBaseField(battleInst, matInfo);
             string mName = mb["m_Name"].AsString;
-            mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
+            bool isEyeMat = mName.Contains("Eye", StringComparison.OrdinalIgnoreCase);
+            // Rename Eye materials to -Iris{slot} so BDSP's runtime eye-sheet UV animator
+            // never slides our 1x1 Legends: Z-A eye texture off the iris onto blank sclera!
+            mb["m_Name"].AsString = isEyeMat ? $"{formId}-Iris{matSlot}" : mName.Replace(baseFormId, formId);
+
+            if (isEyeMat)
+            {
+                // Strip Layer1 (vanilla eyelid/iris overlay) and vanilla eye sprite-sheet masks
+                string kw = mb["m_ShaderKeywords"].AsString;
+                var cleanKw = kw.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(k => k != "USE_LAYER1" && k != "USE_RIM_MASK_TEX" && k != "USE_SPECULAR_MASK_TEX" && k != "USE_SPHEREMASK_TEX");
+                mb["m_ShaderKeywords"].AsString = string.Join(" ", cleanKw);
+                foreach (var fl in mb["m_SavedProperties.m_Floats.Array"].Children)
+                {
+                    string fk = fl["first"].AsString;
+                    if (fk == "_Layer1Enable" || fk == "_Layer1OverLerpValue" || fk == "_RimMaskEnable" ||
+                        fk == "_SpecularMaskEnable" || fk == "_SphereMaskEnable" || fk == "_EmissionMaskUse")
+                        fl["second"].AsFloat = 0f;
+                }
+            }
+
             foreach (var texEntry in mb["m_SavedProperties.m_TexEnvs.Array"].Children)
             {
                 string prop = texEntry["first"].AsString;
                 var tex = texEntry["second.m_Texture"];
                 bool isCol = prop == "_Col0Tex" || prop == "_BaseMap" || prop == "_MainTex";
                 bool isEmi = prop == "_EmissionMaskTex" || prop == "_EmissionMap";
+                if (isEyeMat && !isCol)
+                {
+                    // Clear vanilla _L1Col0Tex / _AmbientTex / _NormalMapTex (2x4/4x4 eye sheets)
+                    tex["m_FileID"].AsInt = 0;
+                    tex["m_PathID"].AsLong = 0;
+                    continue;
+                }
                 if (isCol)
                 {
                     if (texPids.TryGetValue($"Sub{matSlot}_col", out long pSub)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pSub; Console.WriteLine($"  Patched [{matSlot}] {mName}.{prop} -> Sub{matSlot}_col"); }
@@ -1826,7 +1854,7 @@ internal static class Program
                     else if (mName.Contains("BodyA") && texPids.TryGetValue("BodyA_col", out long pa)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pa; Console.WriteLine($"  Patched {mName}.{prop} -> BodyA_col"); }
                     else if (mName.Contains("BodyB") && texPids.TryGetValue("BodyB_col", out long pb)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pb; Console.WriteLine($"  Patched {mName}.{prop} -> BodyB_col"); }
                     else if (mName.Contains("Body") && texPids.TryGetValue("Body_col", out long pbody)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pbody; Console.WriteLine($"  Patched {mName}.{prop} -> Body_col"); }
-                    else if (mName.Contains("Eye") && texPids.TryGetValue("Eye_col", out long pe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pe; Console.WriteLine($"  Patched {mName}.{prop} -> Eye_col"); }
+                    else if (mName.Contains("Eye") && texPids.TryGetValue("Eye_col", out long pe)) { tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pe; Console.WriteLine($"  Patched {mName}.{prop} -> Eye_col (Layer1 cleared)"); }
                 }
                 else if (isEmi)
                 {
@@ -1898,6 +1926,41 @@ internal static class Program
         Directory.CreateDirectory(Path.GetDirectoryName(outBundle)!);
         File.Move(tmpLz4, outBundle, true);
         Console.WriteLine($"Built {formId} Switch bundle -> {outBundle} ({new FileInfo(outBundle).Length:N0} bytes, CAB={newCab}, verts={vCount}, tris={allIdx.Count / 3})");
+        return 0;
+    }
+
+    private static int InspectMats(string[] args)
+    {
+        var am = new AssetsManager();
+        var bun = am.LoadBundleFile(args[0], true);
+        var inst = am.LoadAssetsFileFromBundle(bun, 0, false);
+        var f = inst.file;
+        var smrInfo = FindPrimaryBodySmr(am, inst);
+        var smrBf = am.GetBaseField(inst, smrInfo);
+        Console.WriteLine($"=== Materials in {Path.GetFileName(args[0])} ===");
+        int slot = 0;
+        foreach (var mRef in smrBf["m_Materials.Array"].Children)
+        {
+            long pid = mRef["m_PathID"].AsLong;
+            var mi = f.GetAssetInfo(pid);
+            if (mi == null) { Console.WriteLine($"  [{slot++}] external pid={pid}"); continue; }
+            var mb = am.GetBaseField(inst, mi);
+            Console.WriteLine($"  [{slot++}] {mb["m_Name"].AsString} (shader fid={mb["m_Shader.m_FileID"].AsInt} pid={mb["m_Shader.m_PathID"].AsLong}, kw='{mb["m_ShaderKeywords"].AsString}', rq={mb["m_CustomRenderQueue"].AsInt})");
+            foreach (var te in mb["m_SavedProperties.m_TexEnvs.Array"].Children)
+            {
+                var tfid = te["second.m_Texture.m_FileID"].AsInt;
+                var tpid = te["second.m_Texture.m_PathID"].AsLong;
+                if (tpid != 0)
+                    Console.WriteLine($"      TEX {te["first"].AsString}: fid={tfid} pid={tpid} scale=({te["second.m_Scale.x"].AsFloat},{te["second.m_Scale.y"].AsFloat}) off=({te["second.m_Offset.x"].AsFloat},{te["second.m_Offset.y"].AsFloat})");
+            }
+            foreach (var fl in mb["m_SavedProperties.m_Floats.Array"].Children)
+            {
+                var k = fl["first"].AsString;
+                if (k.Contains("Alpha") || k.Contains("Cull") || k.Contains("Stencil") || k.Contains("ZWrite") || k.Contains("Eye") || k.Contains("Mask") || k.Contains("Layer") || k.Contains("Mode") || k.Contains("Offset") || k.Contains("Scale") || k.Contains("Uv") || k.Contains("UV"))
+                    Console.WriteLine($"      FLT {k} = {fl["second"].AsFloat}");
+            }
+        }
+        am.UnloadAll(true);
         return 0;
     }
 }

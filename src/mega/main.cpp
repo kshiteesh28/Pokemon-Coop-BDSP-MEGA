@@ -1065,7 +1065,8 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
                     if (clone != nullptr) {
                         std::memcpy(&clone->fields, &base->fields,
                                     sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
-                        clone->fields.basic_hp = static_cast<uint8_t>(md->hp);
+                        // Mega Evolution NEVER changes Base HP; keep base->fields.basic_hp intact
+                        // so Luminescent Platinum base-HP buffs (e.g. Absol) never drop HP on Mega Evolve.
                         clone->fields.basic_atk = static_cast<uint8_t>(md->attack);
                         clone->fields.basic_def = static_cast<uint8_t>(md->defense);
                         clone->fields.basic_spatk = static_cast<uint8_t>(md->specialAttack);
