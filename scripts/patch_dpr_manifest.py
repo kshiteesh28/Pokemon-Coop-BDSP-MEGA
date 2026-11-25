@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Patch BDSP / Luminescent Platinum AssetAssistant Dpr.bin (MS-NRBF BinaryFormatter)
-to register Mega Charizard X & Y battle and field AssetBundleRecord entries.
+"""Dynamic BDSP / Luminescent Platinum AssetAssistant Dpr.bin (MS-NRBF BinaryFormatter) patcher.
 
-Reads the source Dpr.bin from Luminescent Platinum 2.2F BD, appends 8 new
-AssetBundleRecord entries (battle + field for pm0006_01_00/01 and pm0006_02_00/01)
-using exact file sizes from romfs-delta/, reuses pm0006_00_00's exact allDependencies
-array reference, and writes the updated Dpr.bin to romfs-delta/.
+Auto-discovers ALL custom Mega Pokemon battle bundles (pmXXXX_YY_00 and pmXXXX_YY_10 where YY != 00)
+in romfs-delta/Data/StreamingAssets/AssetAssistant/Pokemon Database/pokemons/battle/,
+dynamically resolves each species' vanilla allDependencies ID from Dpr.bin, enforces zero duplicate
+assetPath / assetBundleName collisions (preventing BuildLookupTables() Dictionary.Add crashes),
+and writes exact file sizes into Dpr.bin.
 """
 
+from __future__ import annotations
+
 import argparse
+import re
 import struct
 from pathlib import Path
 
@@ -16,7 +19,8 @@ RECORDS_LEN_OFFSET = 0x0133
 RECORDS_ITEMS_OFFSET = 0x0168
 RECORD_METADATA_ID = 6
 HASH_METADATA_ID = 0xFFFF9DB3  # signed -25165 (same as vanilla RecordedHash in Dpr.bin)
-BATTLE_DEPS_ID = 0x69DD        # allDependencies of pokemons/battle/pm0006_00_00
+
+MEGA_BUNDLE_RE = re.compile(r"^(pm\d{4})_(\d{2})_(00|10)$")
 
 
 def encode_7bit_len(n: int) -> bytes:
@@ -41,94 +45,83 @@ def encode_array_single_string(arr_id: int, str_id: int, text: str) -> bytes:
     )
 
 
-def find_field_deps_id(data: bytes) -> tuple[int, bytes]:
-    marker = b"pokemons/field/pm0006_00_00"
-    idx = data.find(marker)
-    if idx == -1:
-        raise ValueError("Could not find pokemons/field/pm0006_00_00 in Dpr.bin")
-    # After string bytes:
-    # RecordedHash ClassWithId (1 + 4 + 4 + 16 = 25 bytes)
-    # DateTime (8 bytes)
-    # bool isStreamingSceneAssetBundle (1 byte)
-    # MemberReference allDependencies (1 + 4 = 5 bytes)
-    # MemberReference assetPaths (1 + 4 = 5 bytes)
-    pos = idx + len(marker)
-    if data[pos] != 0x01:
-        raise ValueError(f"Unexpected RecordedHash opcode 0x{data[pos]:02x} at {pos}")
-    hash_and_time = data[pos : pos + 25 + 8]
-    pos += 25 + 8 + 1  # skip hash (25), DateTime (8), bool (1)
-    if data[pos] != 0x09:
-        raise ValueError(f"Expected MemberReference (0x09) for field allDependencies at {pos}")
-    deps_id = struct.unpack_from("<I", data, pos + 1)[0]
-    return deps_id, hash_and_time
+def find_battle_deps_id(data: bytes, species_prefix: str) -> int:
+    marker = f"pokemons/battle/{species_prefix}_00_00".encode("utf-8")
+    p = data.find(marker)
+    if p == -1:
+        raise ValueError(f"Could not find vanilla battle record {marker.decode()} in Dpr.bin")
+    dp = p + len(marker) + 25 + 8 + 1
+    if dp + 5 > len(data) or data[dp] != 0x09:
+        raise ValueError(f"Expected MemberReference (0x09) for {species_prefix} battle allDependencies at 0x{dp:x}")
+    return struct.unpack_from("<I", data, dp + 1)[0]
 
 
-def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
+def discover_mega_battle_bundles(delta_root: Path) -> list[tuple[str, str, str]]:
+    battle_dir = delta_root / "Pokemon Database" / "pokemons" / "battle"
+    if not battle_dir.exists():
+        raise FileNotFoundError(f"Missing battle bundle directory: {battle_dir}")
+
+    discovered: list[tuple[str, str, str]] = []
+    for p in sorted(battle_dir.iterdir()):
+        if not p.is_file():
+            continue
+        m = MEGA_BUNDLE_RE.match(p.name)
+        if not m:
+            continue
+        species_prefix, form_str, _variant = m.groups()
+        if form_str == "00":
+            continue
+        bundle_name = f"pokemons/battle/{p.name}"
+        asset_path = f"assets/pokemons/battle/{species_prefix}/{p.name}.prefab"
+        discovered.append((species_prefix, bundle_name, asset_path))
+    return discovered
+
+
+def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> int:
     data = source.read_bytes()
-    if data[-1] != 0x0B:
+    if not data or data[-1] != 0x0B:
         raise ValueError("Dpr.bin does not end with NRBF MessageEnd (0x0B)")
 
     orig_count = struct.unpack_from("<I", data, RECORDS_LEN_OFFSET)[0]
     array_end = RECORDS_ITEMS_OFFSET + orig_count * 5
-    # Verify every entry in _records is a MemberReference (0x09)
     if data[RECORDS_ITEMS_OFFSET] != 0x09 or data[array_end - 5] != 0x09:
         raise ValueError("Unexpected _records array layout in Dpr.bin")
     if data[array_end] == 0x09:
         raise ValueError("_records array end offset mismatch")
 
-    # Verify battle template allDependencies ID exists
-    if data.find(b"\x11" + struct.pack("<I", BATTLE_DEPS_ID)) == -1:
-        raise ValueError("Battle allDependencies array 0x69dd not found in Dpr.bin")
-
-    field_deps_id, _ = find_field_deps_id(data)
-
-    # Grab exact DateTime bytes from pm0006_00_00 battle record
-    b_idx = data.find(b"pokemons/battle/pm0006_00_00")
+    b_marker = b"pokemons/battle/pm0006_00_00"
+    b_idx = data.find(b_marker)
     if b_idx == -1:
         raise ValueError("Could not find pokemons/battle/pm0006_00_00 in Dpr.bin")
-    battle_datetime = data[b_idx + len(b"pokemons/battle/pm0006_00_00") + 25 : b_idx + len(b"pokemons/battle/pm0006_00_00") + 33]
+    battle_datetime = data[b_idx + len(b_marker) + 25 : b_idx + len(b_marker) + 33]
 
-    # Dynamically look up each species' vanilla battle allDependencies ID in Dpr.bin
-    def find_battle_deps_id(species_prefix: str) -> int:
-        m = f"pokemons/battle/{species_prefix}_00_00".encode("utf-8")
-        p = data.find(m)
-        if p == -1:
-            raise ValueError(f"Could not find {m.decode()} in Dpr.bin")
-        dp = p + len(m) + 25 + 8 + 1
-        if data[dp] != 0x09:
-            raise ValueError(f"Expected MemberReference (0x09) for {species_prefix} battle allDependencies")
-        return struct.unpack_from("<I", data, dp + 1)[0]
+    discovered = discover_mega_battle_bundles(delta_root)
+    if not discovered:
+        raise RuntimeError(f"No Mega battle bundles found under {delta_root}")
 
-    charizard_deps_id = find_battle_deps_id("pm0006")
-    absol_deps_id = find_battle_deps_id("pm0359")
+    deps_cache: dict[str, int] = {}
+    entries: list[tuple[str, str, int]] = []
+    seen_paths: set[bytes] = set()
+    seen_names: set[str] = set()
 
-    entries = [
-        ("pokemons/battle/pm0006_01_00", "assets/pokemons/battle/pm0006/pm0006_01_00.prefab", charizard_deps_id),
-        ("pokemons/battle/pm0006_01_10", "assets/pokemons/battle/pm0006/pm0006_01_10.prefab", charizard_deps_id),
-        ("pokemons/battle/pm0006_02_00", "assets/pokemons/battle/pm0006/pm0006_02_00.prefab", charizard_deps_id),
-        ("pokemons/battle/pm0359_01_00", "assets/pokemons/battle/pm0359/pm0359_01_00.prefab", absol_deps_id),
-        ("pokemons/battle/pm0359_01_10", "assets/pokemons/battle/pm0359/pm0359_01_10.prefab", absol_deps_id),
-        ("pokemons/battle/pm0359_02_00", "assets/pokemons/battle/pm0359/pm0359_02_00.prefab", absol_deps_id),
-        ("pokemons/battle/pm0359_02_10", "assets/pokemons/battle/pm0359/pm0359_02_10.prefab", absol_deps_id),
-    ]
+    for species_prefix, bundle_name, asset_path in discovered:
+        if species_prefix not in deps_cache:
+            deps_cache[species_prefix] = find_battle_deps_id(data, species_prefix)
 
-    # Guard against AssetBundleDownloadManifest.BuildLookupTables() Dictionary.Add duplicate-key crashes
-    seen_paths = set()
-    for bundle_name, asset_path, _ in entries:
         key = asset_path.lower().encode("utf-8")
         if key in seen_paths or data.find(key) != -1:
             raise ValueError(f"Duplicate assetPath would crash BuildLookupTables(): {asset_path}")
-        if data.find(bundle_name.encode("utf-8")) != -1:
+        if bundle_name in seen_names or data.find(bundle_name.encode("utf-8")) != -1:
             raise ValueError(f"Duplicate assetBundleName already in Dpr.bin: {bundle_name}")
         seen_paths.add(key)
+        seen_names.add(bundle_name)
+        entries.append((bundle_name, asset_path, deps_cache[species_prefix]))
 
-    # Locate end of AssetBundleRecord block (right after last record id=25063, before first ArraySingleString 0x11)
     first_arr_marker = b"\x11\x4e\x62\x00\x00"
     records_block_end = data.find(first_arr_marker)
     if records_block_end == -1:
         raise ValueError("Could not locate end of AssetBundleRecord block in Dpr.bin")
 
-    # Use clean sequential IDs immediately above vanilla's max positive ID (0x042e9a) and below min negative ID (-150450)
     next_id = 0x00042F00
     next_neg_id = -200000
 
@@ -141,6 +134,8 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
         if not bundle_file.exists():
             raise FileNotFoundError(f"Missing bundle in romfs-delta: {bundle_file}")
         file_size = bundle_file.stat().st_size
+        if file_size <= 0:
+            raise ValueError(f"Empty bundle file: {bundle_file}")
 
         rec_id = next_id; next_id += 1
         proj_str_id = next_id; next_id += 1
@@ -149,27 +144,18 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
         path_str_id = next_id; next_id += 1
         hash_obj_id = next_neg_id; next_neg_id -= 1
 
-        # Add MemberReference into _records[]
         new_refs.extend(b"\x09" + struct.pack("<I", rec_id))
-
-        # ClassWithId(AssetBundleRecord, metadataId=6) placed inside the AssetBundleRecord block
         new_record_objs.extend(b"\x01" + struct.pack("<II", rec_id, RECORD_METADATA_ID))
         new_record_objs.extend(encode_binary_string(proj_str_id, "Pokemon Database"))
         new_record_objs.extend(encode_binary_string(name_str_id, bundle_name))
-        # Inline RecordedHash ClassWithId (16 zero bytes)
         new_record_objs.extend(b"\x01" + struct.pack("<iI", hash_obj_id, HASH_METADATA_ID) + b"\x00" * 16)
-        # DateTime (8 bytes) + bool isStreamingSceneAssetBundle (0)
         new_record_objs.extend(battle_datetime + b"\x00")
-        # MemberReference allDependencies + MemberReference assetPaths
         new_record_objs.extend(b"\x09" + struct.pack("<I", deps_id))
         new_record_objs.extend(b"\x09" + struct.pack("<I", paths_arr_id))
-        # int64 size
         new_record_objs.extend(struct.pack("<q", file_size))
 
-        # Place referenced assetPaths ArraySingleString in the ArraySingleString section at the end
         new_path_arrays.extend(encode_array_single_string(paths_arr_id, path_str_id, asset_path.lower()))
-
-        print(f"Registered {bundle_name} (rec_id=0x{rec_id:x}, size={file_size:,}, asset={asset_path}, deps_id=0x{deps_id:x})")
+        print(f"Registered {bundle_name} (rec_id=0x{rec_id:x}, size={file_size:,}, deps_id=0x{deps_id:x})")
 
     new_count = orig_count + len(entries)
     out = bytearray()
@@ -181,15 +167,13 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
     out.extend(new_record_objs)
     out.extend(data[records_block_end:-1])
     out.extend(new_path_arrays)
-    out.append(0x0B)  # NRBF MessageEnd
+    out.append(0x0B)
 
-    # Update existing Message/english record size in-place if overridden in romfs-delta
     msg_en = delta_root / "Message" / "english"
     if msg_en.exists():
         m_marker = b"\x07Message\x06\x1e:\x01\x00\x07english"
         m_idx = out.find(m_marker)
         if m_idx != -1:
-            # After string: RecordedHash(25) + DateTime(8) + bool(1) + allDeps(5) + assetPaths(5) = 44 bytes -> int64 size
             sz_pos = m_idx + len(m_marker) + 44
             old_sz = struct.unpack_from("<q", out, sz_pos)[0]
             new_sz = msg_en.stat().st_size
@@ -198,7 +182,8 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> None:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(out)
-    print(f"Wrote {output} ({len(out):,} bytes, records: {orig_count} -> {new_count})")
+    print(f"Wrote {output} ({len(out):,} bytes, records: {orig_count} -> {new_count}, +{len(entries)} Mega bundles)")
+    return len(entries)
 
 
 if __name__ == "__main__":

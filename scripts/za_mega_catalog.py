@@ -33,11 +33,15 @@ class MegaFormSpec:
 
     @property
     def normal_bundle(self) -> str:
-        return f"pm{self.species:04d}_{self.form:02d}_00"
+        # Legacy shipped Charizard/Absol use _01/_02; all other Megas use Game Freak's native _51/_52
+        # to guarantee zero collision with BDSP female gender-difference bundles (pmXXXX_01_00).
+        num = self.form if self.species in (6, 359) else self.za_form_num
+        return f"pm{self.species:04d}_{num:02d}_00"
 
     @property
     def shiny_bundle(self) -> str:
-        return f"pm{self.species:04d}_{self.form:02d}_10"
+        num = self.form if self.species in (6, 359) else self.za_form_num
+        return f"pm{self.species:04d}_{num:02d}_10"
 
     def cab_id(self, shiny: bool) -> str:
         tag = f"bdsp-za-mega:{self.shiny_bundle if shiny else self.normal_bundle}"
