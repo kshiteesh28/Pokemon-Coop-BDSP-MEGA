@@ -773,54 +773,28 @@ inline bool utf16EqualsAsciiRange(const uint16_t* chars, int32_t len, const char
     return true;
 }
 
-// Resolves a custom Mega bundle name (e.g. "pm0359_02_00") to its guaranteed-valid vanilla field
-// bundle name (e.g. "pm0359_00_00", or "pm0609_11_00" for Chandelure) so UIModelViewController and
-// AssetManager always agree on the exact same FieldPokemonEntity bundle name in Dpr.bin.
-inline bool resolveCustomMegaVanillaFieldName(const uint16_t* nameChars, int32_t nameLen,
-                                              char* outName, size_t outSize) {
-    if (nameChars == nullptr || nameLen <= 0 || nameLen > 64 || outName == nullptr || outSize < 32) {
+// Returns true when nameChars[0..nameLen) matches any of our 128 packed custom Mega battle bundles
+// (Normal or Shiny) registered in Dpr.bin.
+inline bool isCustomMegaBundleName(const uint16_t* nameChars, int32_t nameLen) {
+    if (nameChars == nullptr || nameLen <= 0 || nameLen > 64) {
         return false;
     }
     for (const auto& e : kMegaRegistry) {
         if (!e.hasCustomModel) {
             continue;
         }
-        const bool matched = (e.bundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.bundleName)) ||
-                             (e.shinyBundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.shinyBundleName));
-        if (matched) {
-            if (e.species == 609) {
-                std::snprintf(outName, outSize, "pm0609_11_00");
-                return true;
-            }
-            if (e.species > 0 && e.species <= 493) {
-                std::snprintf(outName, outSize, "pm%04d_00_00", e.species);
-                return true;
-            }
-            return false;
+        if ((e.bundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.bundleName)) ||
+            (e.shinyBundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.shinyBundleName))) {
+            return true;
         }
     }
     return false;
 }
 
-inline System::String::Object* redirectCustomMegaBundleNameOnly(System::String::Object* assetBundleName) {
-    if (assetBundleName == nullptr) {
-        return assetBundleName;
-    }
-    const int32_t len = assetBundleName->fields.m_stringLength;
-    if (len <= 0 || len > 64) {
-        return assetBundleName;
-    }
-    const uint16_t* chars = reinterpret_cast<const uint16_t*>(&assetBundleName->fields.m_firstChar);
-    char vanillaName[32];
-    if (resolveCustomMegaVanillaFieldName(chars, len, vanillaName, sizeof(vanillaName))) {
-        return System::String::Create(vanillaName);
-    }
-    return assetBundleName;
-}
-
-// Safe redirect for UIModelViewController (Party 3D preview & Summary):
-// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/field/<vanillaFieldBundle>"
-// cleanly at AssetManager entry points as a paired safety net.
+// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/battle/<customMegaBundle>"
+// so UIModelViewController (Show Info / Pokémon Skills & Party 3D preview) renders the actual
+// 3D Mega-Evolved model (Normal or Shiny) directly from our verified battle AssetBundles.
+// Applied symmetrically to AppendAssetBundleRequest and UnloadAssetBundle so refcounts stay balanced.
 inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String::Object* bundlePath) {
     if (bundlePath == nullptr) {
         return bundlePath;
@@ -835,10 +809,15 @@ inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String:
     if (!utf16EqualsAsciiRange(chars, kPrefixLen, kFieldPrefix)) {
         return bundlePath;
     }
-    char vanillaName[32];
-    if (resolveCustomMegaVanillaFieldName(chars + kPrefixLen, len - kPrefixLen, vanillaName, sizeof(vanillaName))) {
-        char targetPath[64];
-        std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/%s", vanillaName);
+    const uint16_t* suffix = chars + kPrefixLen;
+    const int32_t suffixLen = len - kPrefixLen;
+    if (isCustomMegaBundleName(suffix, suffixLen) && suffixLen < 48) {
+        char targetPath[80];
+        std::memcpy(targetPath, "pokemons/battle/", 16);
+        for (int32_t i = 0; i < suffixLen; ++i) {
+            targetPath[16 + i] = static_cast<char>(suffix[i] & 0x7F);
+        }
+        targetPath[16 + suffixLen] = '\0';
         return System::String::Create(targetPath);
     }
     return bundlePath;
@@ -1517,8 +1496,14 @@ HOOK_DEFINE_TRAMPOLINE(SubContents_Utils$$PlayVoice) {
 
 HOOK_DEFINE_TRAMPOLINE(SubContents_Utils$$GetPokemonAssetbundleName) {
     static System::String::Object* Callback(System::String::Object* assetBundleName, const void* methodInfo) {
-        auto* resolved = mega::redirectCustomMegaBundleNameOnly(assetBundleName);
-        return Orig(resolved, methodInfo);
+        if (assetBundleName != nullptr) {
+            const int32_t len = assetBundleName->fields.m_stringLength;
+            const uint16_t* chars = reinterpret_cast<const uint16_t*>(&assetBundleName->fields.m_firstChar);
+            if (mega::isCustomMegaBundleName(chars, len)) {
+                return System::String::Concat(System::String::Create("pokemons/battle/"), assetBundleName);
+            }
+        }
+        return Orig(assetBundleName, methodInfo);
     }
 };
 
@@ -1637,18 +1622,15 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     }
 };
 
-// Prevents Mega Absol Z / Mega Froslass (and all Legends: Z-A Megas) from crashing or showing an Egg icon
-// in Party UI: never pass out-of-range non-Gen6 Mega formNo to vanilla GetPokemonIconData.
+// Resolves 2D Party icons for all 64 Mega Evolutions (46 Gen 6 + 18 Legends: Z-A packed into texturemass).
+// Falls back to base form only if a lookup returns null, empty, or an Egg icon ("0000").
 HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
     static XLSXContent::UIDatabase::SheetPokemonIcon::Object* Callback(
         Dpr::UI::UIManager::Object* __this,
         int32_t monsNo, uint16_t formNo, Pml::Sex sex, Pml::PokePara::RareType rareType, bool isEgg,
         const void* methodInfo) {
         if (__this != nullptr && !isEgg && formNo != mega::kBaseForm) {
-            if (const auto* md = mega::findMegaByForm(monsNo, formNo); md != nullptr) {
-                if (!mega::isNativeGen6MegaStone(md->stoneItemId)) {
-                    return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
-                }
+            if (mega::findMegaByForm(monsNo, formNo) != nullptr) {
                 auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
                 const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
                                           (res->fields.AssetName == nullptr) ||
