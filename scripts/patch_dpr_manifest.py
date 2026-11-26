@@ -169,16 +169,21 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> int:
     out.extend(new_path_arrays)
     out.append(0x0B)
 
-    msg_en = delta_root / "Message" / "english"
-    if msg_en.exists():
-        m_marker = b"\x07Message\x06\x1e:\x01\x00\x07english"
-        m_idx = out.find(m_marker)
-        if m_idx != -1:
-            sz_pos = m_idx + len(m_marker) + 44
-            old_sz = struct.unpack_from("<q", out, sz_pos)[0]
-            new_sz = msg_en.stat().st_size
-            struct.pack_into("<q", out, sz_pos, new_sz)
-            print(f"Updated message/english size in Dpr.bin ({old_sz:,} -> {new_sz:,})")
+    size_updates = [
+        (delta_root / "Message" / "english", b"\x07Message\x06\x1e:\x01\x00\x07english", "Message/english"),
+        (delta_root / "Pml" / "personal_masterdatas", b"\x03Pml\x06P:\x01\x00\x14personal_masterdatas", "Pml/personal_masterdatas"),
+        (delta_root / "Dpr" / "masterdatas", b"\x03Dpr\x06\xd2c\x00\x00\x0bmasterdatas", "Dpr/masterdatas"),
+        (delta_root / "UIs" / "masterdatas" / "uimasterdatas", b"\x03UIs\x06\xa5:\x01\x00\x19masterdatas/uimasterdatas", "UIs/masterdatas/uimasterdatas"),
+    ]
+    for path, marker, label in size_updates:
+        if path.exists():
+            m_idx = out.find(marker)
+            if m_idx != -1:
+                sz_pos = m_idx + len(marker) + 44
+                old_sz = struct.unpack_from("<q", out, sz_pos)[0]
+                new_sz = path.stat().st_size
+                struct.pack_into("<q", out, sz_pos, new_sz)
+                print(f"Updated {label} size in Dpr.bin ({old_sz:,} -> {new_sz:,})")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(out)
