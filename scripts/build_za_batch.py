@@ -1087,7 +1087,11 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
         skel_full = zac.parse_trskl_full(files["trskl"])
         tranms = zac.discover_tranms(pack_dir, spec.za_pack)
-        idle_hit = zac.match_tranm_for_role(tranms, zac.BDSP_ROLE_TO_ZA_PATTERNS[0][2])
+        idle_hit = zac.match_tranm_for_role(
+            tranms,
+            zac.BDSP_ROLE_TO_ZA_PATTERNS[0][2],
+            prefer_airborne=(spec.za_pack in zac.FLYING_BATTLE_PACKS),
+        )
         idle_clip = zac.decode_tranm(idle_hit[1], skel_full, target_fps=30) if idle_hit else None
 
         # Compute scale, ground offset (ty), and center Z (tz) from the ACTUAL battle-idle posed mesh

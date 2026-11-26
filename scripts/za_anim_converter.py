@@ -671,15 +671,43 @@ BDSP_ROLE_TO_ZA_PATTERNS: list[tuple[str, bool, list[str]]] = [
 ]
 
 
-def match_tranm_for_role(tranms: dict[str, Path], patterns: list[str]) -> tuple[str, Path] | None:
-    lower_map = {k.lower(): (k, v) for k, v in tranms.items()}
+FLYING_BATTLE_PACKS: set[str] = {
+    "pm0006_52_00",  # Mega Charizard Y
+    "pm0018_51_00",  # Mega Pidgeot
+    "pm0130_51_00",  # Mega Gyarados
+    "pm0142_51_00",  # Mega Aerodactyl
+    "pm0227_51_00",  # Mega Skarmory
+    "pm0334_51_00",  # Mega Altaria
+    "pm0373_51_00",  # Mega Salamence
+    "pm0398_51_00",  # Mega Staraptor
+}
+
+
+def _tranm_mode_rank(name_lower: str, prefer_airborne: bool) -> int:
+    """Ranks Z-A movement modes: 00xxx = Ground, 10xxx = Water/Swim, 20xxx = Air/Fly."""
+    m = re.search(r"_(\d{2})\d{3}_", name_lower)
+    mode = m.group(1) if m else ""
+    if prefer_airborne:
+        return {"20": 0, "00": 1, "10": 2}.get(mode, 3)
+    return {"00": 0, "20": 1, "10": 2}.get(mode, 3)
+
+
+def match_tranm_for_role(
+    tranms: dict[str, Path],
+    patterns: list[str],
+    prefer_airborne: bool = False,
+) -> tuple[str, Path] | None:
+    ordered = sorted(
+        ((k.lower(), k, v) for k, v in tranms.items()),
+        key=lambda x: (_tranm_mode_rank(x[0], prefer_airborne), x[0]),
+    )
     for pat in patterns:
-        # Exact suffix match before .tranm first (e.g. _attack01.tranm)
-        for lk, (orig, path) in lower_map.items():
+        # Exact suffix match before .tranm first (e.g. _attack01.tranm), respecting mode priority
+        for lk, orig, path in ordered:
             if lk.endswith(f"_{pat}.tranm") or lk == f"{pat}.tranm":
                 return orig, path
-        # Substring fallback
-        for lk, (orig, path) in lower_map.items():
+        # Substring fallback, respecting mode priority
+        for lk, orig, path in ordered:
             if pat in lk:
                 return orig, path
     return None
@@ -701,13 +729,14 @@ def export_rig_and_anims(
     if not tranms:
         raise FileNotFoundError(f"No .tranm files resolved in {pack_dir} ({za_pack})")
 
+    prefer_airborne = za_pack in FLYING_BATTLE_PACKS
     decoded_cache: dict[Path, dict[str, Any]] = {}
     clips_meta: list[dict[str, Any]] = []
     samples_blob = bytearray()
     nodes = skel["nodes"]
 
     for role, force_loop, patterns in BDSP_ROLE_TO_ZA_PATTERNS:
-        hit = match_tranm_for_role(tranms, patterns)
+        hit = match_tranm_for_role(tranms, patterns, prefer_airborne=prefer_airborne)
         if hit is None:
             # Ultimate fallback: pick first available tranm
             orig_name, tpath = next(iter(tranms.items()))
