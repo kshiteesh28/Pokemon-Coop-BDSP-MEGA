@@ -439,6 +439,7 @@ def build_universal_bone_remapper(
     nodes: list[tuple[str, int, int]],
     rig_to_node: dict[int, int],
     lock_arms_to_torso: bool = False,
+    head_wings_to_head: bool = False,
 ) -> tuple[dict[int, int], int]:
     import re
     van_idx = {b: i for i, b in enumerate(van_bones)}
@@ -511,6 +512,8 @@ def build_universal_bone_remapper(
     def resolve_name(nl: str, nidx: int) -> int | None:
         if lock_arms_to_torso and any(k in nl for k in ("shoulder", "arm", "hand", "finger", "index", "middle", "ring", "thumb", "pinky")) and not any(k in nl for k in ("foot", "toe", "leg", "thigh", "ankle")):
             return torso_anchor
+        if head_wings_to_head and "wing" in nl:
+            return first_match("Head", "Neck", "Spine2")
         if nl in van_lower:
             return van_lower[nl]
         if nl in semantic_candidates:
@@ -1038,7 +1041,9 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
     nodes, rig_to_node = parse_trskl(files["trskl"])
     rig_map, fallback_bone = build_universal_bone_remapper(
-        van_bones, nodes, rig_to_node, lock_arms_to_torso=(spec.za_pack in LOCK_ARMS_TO_TORSO_PACKS)
+        van_bones, nodes, rig_to_node,
+        lock_arms_to_torso=(spec.za_pack in LOCK_ARMS_TO_TORSO_PACKS),
+        head_wings_to_head=(spec.za_pack == "pm0149_51_00"),
     )
 
     skip_shapes = SKIP_SHAPES_BY_PACK.get(spec.za_pack, set())
