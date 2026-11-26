@@ -52,8 +52,8 @@ class MegaFormSpec:
 MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     # --- Kanto (21) ---
     MegaFormSpec(3,   1, "Mega Venusaur",    "kanto",  51, 659,  True,  1.00),
-    MegaFormSpec(6,   1, "Mega Charizard X", "kanto",  51, 660,  True,  1.05),
-    MegaFormSpec(6,   2, "Mega Charizard Y", "kanto",  52, 678,  True,  1.04),
+    MegaFormSpec(6,   1, "Mega Charizard X", "kanto",  51, 660,  True,  1.12),
+    MegaFormSpec(6,   2, "Mega Charizard Y", "kanto",  52, 678,  True,  1.32),
     MegaFormSpec(9,   1, "Mega Blastoise",   "kanto",  51, 661,  True,  1.02),
     MegaFormSpec(15,  1, "Mega Beedrill",    "kanto",  51, 770,  False, 1.05),
     MegaFormSpec(18,  1, "Mega Pidgeot",     "kanto",  51, 762,  False, 1.05),
@@ -67,7 +67,7 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(115, 1, "Mega Kangaskhan",  "kanto",  51, 675,  True,  1.00),
     MegaFormSpec(121, 1, "Mega Starmie",     "kanto",  51, 839,  False, 1.02),
     MegaFormSpec(127, 1, "Mega Pinsir",      "kanto",  51, 671,  False, 1.04),
-    MegaFormSpec(130, 1, "Mega Gyarados",    "kanto",  51, 676,  True,  1.02),
+    MegaFormSpec(130, 1, "Mega Gyarados",    "kanto",  51, 676,  True,  1.05),
     MegaFormSpec(142, 1, "Mega Aerodactyl",  "kanto",  51, 672,  False, 1.12),
     MegaFormSpec(149, 1, "Mega Dragonite",   "kanto",  51, 840,  True,  1.28),
     MegaFormSpec(150, 1, "Mega Mewtwo X",    "kanto",  51, 662,  True,  1.05),
@@ -76,7 +76,7 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(154, 1, "Mega Meganium",    "johto",  51, 848,  True,  1.02),
     MegaFormSpec(160, 1, "Mega Feraligatr",  "johto",  51, 859,  True,  1.04),
     MegaFormSpec(181, 1, "Mega Ampharos",    "johto",  51, 658,  False, 1.02),
-    MegaFormSpec(208, 1, "Mega Steelix",     "johto",  51, 761,  True,  1.04),
+    MegaFormSpec(208, 1, "Mega Steelix",     "johto",  51, 761,  True,  2.25),
     MegaFormSpec(212, 1, "Mega Scizor",      "johto",  51, 670,  True,  1.04),
     MegaFormSpec(214, 1, "Mega Heracross",   "johto",  51, 680,  False, 1.04),
     MegaFormSpec(227, 1, "Mega Skarmory",    "johto",  51, 867,  True,  1.04),
@@ -114,7 +114,7 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(448, 2, "Mega Lucario Z",   "sinnoh", 52, 1101, True,  1.04),
     MegaFormSpec(460, 1, "Mega Abomasnow",   "sinnoh", 51, 674,  True,  1.04),
     MegaFormSpec(475, 1, "Mega Gallade",     "sinnoh", 51, 756,  True,  1.02),
-    MegaFormSpec(478, 1, "Mega Froslass",    "sinnoh", 51, 868,  False, 1.02),
+    MegaFormSpec(478, 1, "Mega Froslass",    "sinnoh", 51, 868,  False, 1.75),
     MegaFormSpec(485, 1, "Mega Heatran",     "sinnoh", 51, 869,  False, 1.04),
     MegaFormSpec(491, 1, "Mega Darkrai",     "sinnoh", 51, 870,  True,  1.04),
     # --- Unova (Luminescent Platinum 2.2F expanded dex: 1) ---

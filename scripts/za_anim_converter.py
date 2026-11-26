@@ -77,7 +77,9 @@ def fnv1a_64(s: str) -> int:
 # Math: Euler XYZ, 48-bit Trinity Quaternion Unpacking, RH -> LH Conversion
 # ---------------------------------------------------------------------------
 
-INV_SQRT2 = 1.0 / math.sqrt(2.0)
+# Trinity 48-bit quaternion quantization range is [-pi/4, +pi/4] (NOT 1/sqrt(2)!)
+# Using 1/sqrt(2) caused 15-28 deg single-frame snaps whenever `missing` switched indices.
+PI_QUARTER = math.pi / 4.0
 
 
 def euler_xyz_to_quat(rx: float, ry: float, rz: float) -> tuple[float, float, float, float]:
@@ -96,14 +98,14 @@ def euler_xyz_to_quat(rx: float, ry: float, rz: float) -> tuple[float, float, fl
 
 
 def unpack_quat48(u0: int, u1: int, u2: int) -> tuple[float, float, float, float]:
-    """Unpacks Trinity 48-bit smallest-three quantized quaternion -> (x, y, z, w) in RH space."""
+    """Unpacks Trinity 48-bit quantized quaternion ([-pi/4, +pi/4]) -> (x, y, z, w) in RH space."""
     pack = (u2 << 32) | (u1 << 16) | u0
     missing = pack & 3  # 0=x, 1=y, 2=z, 3=w
     is_neg = (pack >> 2) & 1
 
-    q1 = (((pack >> 3) & 0x7FFF) / 32767.0) * (2.0 * INV_SQRT2) - INV_SQRT2
-    q2 = (((pack >> 18) & 0x7FFF) / 32767.0) * (2.0 * INV_SQRT2) - INV_SQRT2
-    q3 = (((pack >> 33) & 0x7FFF) / 32767.0) * (2.0 * INV_SQRT2) - INV_SQRT2
+    q1 = (((pack >> 3) & 0x7FFF) / 32767.0) * (2.0 * PI_QUARTER) - PI_QUARTER
+    q2 = (((pack >> 18) & 0x7FFF) / 32767.0) * (2.0 * PI_QUARTER) - PI_QUARTER
+    q3 = (((pack >> 33) & 0x7FFF) / 32767.0) * (2.0 * PI_QUARTER) - PI_QUARTER
     rem = math.sqrt(max(0.0, 1.0 - (q1 * q1 + q2 * q2 + q3 * q3)))
 
     if missing == 0:
@@ -556,6 +558,89 @@ def evaluate_skeleton_world_mats(
     return [get_w(i) for i in range(len(nodes))]
 
 
+def compute_posed_metrics(
+    skel: dict[str, Any],
+    rest_verts_unity: np.ndarray,
+    rig_indices: np.ndarray,
+    rig_weights: np.ndarray,
+    idle_clip: dict[str, Any],
+) -> dict[str, float]:
+    """Evaluates waitA01 across 5 evenly spaced frames and computes full, core-body, and foot-grounded bounds."""
+    rest_w = evaluate_skeleton_world_mats(skel, None, 0)
+    rig_nodes = skel["rig_node_list"]
+    nodes = skel["nodes"]
+    n_bones = len(rig_nodes)
+    inv_rests = [np.linalg.inv(rest_w[nidx]) for nidx in rig_nodes]
+
+    # Classify skin bones: exclude appendages (wings/feelers/fins/ribbons/flames/hairs/tails) from core height
+    non_core_kw = ("wing", "feeler", "fin", "feather", "ribbon", "flame", "fire", "hair", "ear", "horn", "antenna", "petal", "leaf", "cloth", "cape")
+    foot_kw = ("foot", "toe", "ankle", "sole", "heel", "claw")
+    is_core_bone = np.ones(n_bones, dtype=bool)
+    is_foot_bone = np.zeros(n_bones, dtype=bool)
+    for bi, nidx in enumerate(rig_nodes):
+        nm = nodes[nidx]["name"].lower()
+        if any(k in nm for k in non_core_kw):
+            is_core_bone[bi] = False
+        if any(k in nm for k in foot_kw) and not any(k in nm for k in ("hand", "arm", "finger", "wing")):
+            is_foot_bone[bi] = True
+
+    prim_bi = np.clip(rig_indices[:, 0], 0, max(0, n_bones - 1))
+    core_mask = is_core_bone[prim_bi]
+    foot_mask = is_foot_bone[prim_bi] & (rig_weights[:, 0] > 0.35)
+
+    fc = idle_clip["frame_count"]
+    sample_frames = sorted(set([0, fc // 4, fc // 2, (3 * fc) // 4, max(0, fc - 1)]))
+    v_h = np.ones((len(rest_verts_unity), 4), dtype=np.float64)
+    v_h[:, :3] = rest_verts_unity
+
+    full_mins, full_maxs, core_mins, core_maxs, foot_mins, med_zs = [], [], [], [], [], []
+    for fr in sample_frames:
+        pose_w = evaluate_skeleton_world_mats(skel, idle_clip, fr)
+        skin_mats = np.zeros((n_bones, 4, 4), dtype=np.float64)
+        for bi, nidx in enumerate(rig_nodes):
+            skin_mats[bi] = pose_w[nidx] @ inv_rests[bi]
+        posed = np.zeros((len(rest_verts_unity), 3), dtype=np.float64)
+        for k in range(4):
+            wk = rig_weights[:, k]
+            mask = wk > 1e-6
+            if not np.any(mask):
+                continue
+            ik = np.clip(rig_indices[mask, k], 0, n_bones - 1)
+            mats = skin_mats[ik]
+            vp = np.einsum("mij,mj->mi", mats[:, :3, :], v_h[mask])
+            posed[mask] += vp * wk[mask, None]
+        ys = posed[:, 1]
+        full_mins.append(float(np.percentile(ys, 0.5)))
+        full_maxs.append(float(np.max(ys)))
+        med_zs.append(float(np.median(posed[:, 2])))
+        if np.sum(core_mask) >= max(50, int(0.20 * len(ys))):
+            cys = ys[core_mask]
+            core_mins.append(float(np.percentile(cys, 0.5)))
+            core_maxs.append(float(np.percentile(cys, 99.5)))
+        if np.sum(foot_mask) >= 12:
+            foot_mins.append(float(np.percentile(ys[foot_mask], 2.0)))
+
+    full_min_y = float(np.median(full_mins))
+    full_max_y = float(np.median(full_maxs))
+    core_h = (float(np.median(core_maxs)) - float(np.median(core_mins))) if core_maxs else (full_max_y - full_min_y)
+    # Anchor grounding on foot soles ONLY when feet sit within 10% of the model's lowest point
+    # (fixes tail-dip bipeds like Tyranitar while preventing ballgowns like Gardevoir from sinking!).
+    if foot_mins:
+        f_min = float(np.median(foot_mins))
+        ground_min_y = f_min if abs(f_min - full_min_y) < 0.10 * max(full_max_y - full_min_y, 0.5) else full_min_y
+    else:
+        ground_min_y = full_min_y
+
+    return {
+        "full_min_y": full_min_y,
+        "full_max_y": full_max_y,
+        "full_h": max(full_max_y - full_min_y, 0.20),
+        "core_h": max(core_h, 0.20),
+        "ground_min_y": ground_min_y,
+        "med_z": float(np.median(med_zs)),
+    }
+
+
 def compute_posed_bounds_y(
     skel: dict[str, Any],
     rest_verts_unity: np.ndarray,
@@ -564,31 +649,9 @@ def compute_posed_bounds_y(
     idle_clip: dict[str, Any],
     frame: int = 0,
 ) -> tuple[float, float, float]:
-    """Skins rest_verts_unity (in unscaled Unity LH space) at idle frame 0 and returns (min_y, max_y, center_z)."""
-    rest_w = evaluate_skeleton_world_mats(skel, None, 0)
-    pose_w = evaluate_skeleton_world_mats(skel, idle_clip, frame)
-    rig_nodes = skel["rig_node_list"]
-    n_bones = len(rig_nodes)
-    skin_mats = np.zeros((n_bones, 4, 4), dtype=np.float64)
-    for bi, nidx in enumerate(rig_nodes):
-        inv_rest = np.linalg.inv(rest_w[nidx])
-        skin_mats[bi] = pose_w[nidx] @ inv_rest
-
-    # Vectorized LBS for speed (10k verts in <5ms)
-    v_h = np.ones((len(rest_verts_unity), 4), dtype=np.float64)
-    v_h[:, :3] = rest_verts_unity
-    posed = np.zeros((len(rest_verts_unity), 3), dtype=np.float64)
-    for k in range(4):
-        wk = rig_weights[:, k]
-        mask = wk > 1e-6
-        if not np.any(mask):
-            continue
-        ik = np.clip(rig_indices[mask, k], 0, n_bones - 1)
-        mats = skin_mats[ik]  # (M, 4, 4)
-        vp = np.einsum("mij,mj->mi", mats[:, :3, :], v_h[mask])
-        posed[mask] += vp * wk[mask, None]
-
-    return float(np.min(posed[:, 1])), float(np.max(posed[:, 1])), float(np.median(posed[:, 2]))
+    """Backward-compatible wrapper around compute_posed_metrics."""
+    m = compute_posed_metrics(skel, rest_verts_unity, rig_indices, rig_weights, idle_clip)
+    return m["ground_min_y"], m["full_max_y"], m["med_z"]
 
 
 # ---------------------------------------------------------------------------

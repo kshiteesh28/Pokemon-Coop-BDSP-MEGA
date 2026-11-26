@@ -1103,25 +1103,31 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
         bw_cat = np.concatenate(all_bw_u, axis=0)
 
         if idle_clip is not None:
-            posed_min_y, posed_max_y, posed_med_z = zac.compute_posed_bounds_y(
-                skel_full, rest_cat, bi_cat, bw_cat, idle_clip, frame=0
-            )
+            metrics = zac.compute_posed_metrics(skel_full, rest_cat, bi_cat, bw_cat, idle_clip)
+            posed_min_y = metrics["ground_min_y"]
+            full_h = metrics["full_h"]
+            core_h = metrics["core_h"]
+            posed_med_z = metrics["med_z"]
+            # Use core_h (excluding wings/fins/feelers/crests) capped at <= 1.30x boost over full_h
+            # so flying/crested Megas keep full torso scale without blowing up Pidgeot/Darkrai/Chandelure!
+            posed_h = max(core_h, full_h / 1.30) if (core_h >= 0.40 * full_h and full_h > 1.15 * core_h) else full_h
         else:
             posed_min_y = float(np.min(rest_cat[:, 1]))
-            posed_max_y = float(np.max(rest_cat[:, 1]))
+            full_h = max(float(np.max(rest_cat[:, 1])) - posed_min_y, 0.20)
+            core_h = full_h
+            posed_h = full_h
             posed_med_z = float(np.median(rest_cat[:, 2]))
 
-        posed_h = max(posed_max_y - posed_min_y, 0.20)
-        target_h = van_h * spec.height_ratio
+        target_h = min(van_h * spec.height_ratio, 4.50)
         scale = target_h / posed_h
-        scale = max(0.35, min(2.50, scale))
+        scale = max(0.35, min(1.30, scale))
         # Clamp negative vanilla AABB minY (e.g. Steelix -0.448, Aerodactyl -0.322) to >= 0.0 so
         # coiled/flying Megas never sink beneath the battleground floor!
         target_min_y = max(van_min_y, 0.0)
         ty = target_min_y - posed_min_y * scale
         tz = max(-0.40 * van_h, min(0.40 * van_h, -posed_med_z * scale))
 
-        print(f"  [NATIVE RIG] Scale={scale:.4f} (idle_h={posed_h:.3f}m -> {posed_h*scale:.3f}m, target={target_h:.3f}m, idle_minY={posed_min_y:.3f} -> {target_min_y:.3f}, tz={tz:+.3f}), bones={skel_full['bone_count']}, slots={len(van_materials)}")
+        print(f"  [NATIVE RIG] Scale={scale:.4f} (core_h={core_h:.3f}m full_h={full_h:.3f}m -> {full_h*scale:.3f}m, target={target_h:.3f}m, ground_minY={posed_min_y:.3f} -> {target_min_y:.3f}, tz={tz:+.3f}), bones={skel_full['bone_count']}, slots={len(van_materials)}")
 
         zac.export_rig_and_anims(pack_dir, spec.za_pack, files["trskl"], out_dir, form_id, scale, ty, tz)
 
