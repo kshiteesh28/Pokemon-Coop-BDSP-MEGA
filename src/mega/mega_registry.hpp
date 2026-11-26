@@ -81,7 +81,6 @@ constexpr int kSlushRush     = 202;
 constexpr int kGalvanize     = 206;
 constexpr int kPsychicSurge  = 227;
 constexpr int kGrassySurge   = 229;
-constexpr int kSharpness     = 292; // Registered natively in Luminescent Platinum sharpness.cpp
 
 struct MegaSpeciesEntry {
     int species;
@@ -134,7 +133,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 208, 1, 761,  0,  75, 125, 230,  55,  95,  30, kSandForce,    kTypeSteel,    kTypeGround,   7400, "pm0208_51_00", "pm0208_51_10", true,  "Steelix",     "Mega Steelix",     "Steelixite" },
     { 212, 1, 670,  0,  70, 150, 140,  65, 100,  75, kTechnician,   kTypeBug,      kTypeSteel,    1250, "pm0212_51_00", "pm0212_51_10", true,  "Scizor",      "Mega Scizor",      "Scizorite" },
     { 214, 1, 680,  0,  80, 185, 115,  40, 105,  75, kSkillLink,    kTypeBug,      kTypeFighting,  625, "pm0214_51_00", "pm0214_51_10", true,  "Heracross",   "Mega Heracross",   "Heracronite" },
-    { 227, 1, 867,  0,  65, 140, 110,  40, 100, 110, kSharpness,    kTypeSteel,    kTypeFlying,    404, "pm0227_51_00", "pm0227_51_10", true,  "Skarmory",    "Mega Skarmory",    "Skarmorite" },
+    { 227, 1, 867,  0,  65, 140, 110,  40, 100, 110, kToughClaws,   kTypeSteel,    kTypeFlying,    404, "pm0227_51_00", "pm0227_51_10", true,  "Skarmory",    "Mega Skarmory",    "Skarmorite" },
     { 229, 1, 666,  0,  75,  90,  90, 140,  90, 115, kSolarPower,   kTypeDark,     kTypeFire,      495, "pm0229_51_00", "pm0229_51_10", true,  "Houndoom",    "Mega Houndoom",    "Houndoominite" },
     { 248, 1, 669,  0, 100, 164, 150,  95, 120,  71, kSandStream,   kTypeRock,     kTypeDark,     2550, "pm0248_51_00", "pm0248_51_10", true,  "Tyranitar",   "Mega Tyranitar",   "Tyranitarite" },
 
@@ -154,7 +153,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 354, 1, 668,  0,  64, 165,  75,  93,  83,  75, kPrankster,    kTypeGhost,    kTypeGhost,     130, "pm0354_51_00", "pm0354_51_10", true,  "Banette",     "Mega Banette",     "Banettite" },
     { 358, 1, 1079, 0,  75,  50, 110, 135, 120,  65, kLevitate,     kTypePsychic,  kTypeSteel,      80, "pm0358_51_00", "pm0358_51_10", true,  "Chimecho",    "Mega Chimecho",    "Chimechite" },
     { 359, 1, 677,  0,  65, 150,  60, 115,  60, 115, kMagicBounce,  kTypeDark,     kTypeDark,      490, "pm0359_01_00", "pm0359_01_10", true,   "Absol",       "Mega Absol",       "Absolite" },
-    { 359, 2, 622,  0,  65, 154,  60,  75,  60, 151, kSharpness,    kTypeDark,     kTypeGhost,     470, "pm0359_02_00", "pm0359_02_10", true,   "Absol",       "Mega Absol Z",     "Absolite Z" },
+    { 359, 2, 622,  0,  65, 154,  60,  75,  60, 151, kToughClaws,   kTypeDark,     kTypeGhost,     470, "pm0359_02_00", "pm0359_02_10", true,   "Absol",       "Mega Absol Z",     "Absolite Z" },
     { 362, 1, 763,  0,  80, 120,  80, 120,  80, 100, kRefrigerate,  kTypeIce,      kTypeIce,      3502, "pm0362_51_00", "pm0362_51_10", true,  "Glalie",      "Mega Glalie",      "Glalitite" },
     { 373, 1, 769,  0,  95, 145, 130, 120,  90, 120, kAerilate,     kTypeDragon,   kTypeFlying,   1126, "pm0373_51_00", "pm0373_51_10", true,  "Salamence",   "Mega Salamence",   "Salamencite" },
     { 376, 1, 758,  0,  80, 145, 150, 105, 110, 110, kToughClaws,   kTypeSteel,    kTypePsychic,  9429, "pm0376_51_00", "pm0376_51_10", true,  "Metagross",   "Mega Metagross",   "Metagrossite" },
@@ -171,7 +170,7 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 448, 2, 1101, 0,  70, 100,  70, 164,  70, 151, kMegaLauncher, kTypeFighting, kTypeSteel,     494, "pm0448_52_00", "pm0448_52_10", true,  "Lucario",     "Mega Lucario Z",   "Lucarionite Z" },
     { 460, 1, 674,  0,  90, 132, 105, 132, 105,  30, kSnowWarning,  kTypeGrass,    kTypeIce,      1850, "pm0460_51_00", "pm0460_51_10", true,  "Abomasnow",   "Mega Abomasnow",   "Abomasite" },
     { 475, 1, 756,  0,  68, 165,  95,  65, 115, 110, kInnerFocus,   kTypePsychic,  kTypeFighting,  564, "pm0475_51_00", "pm0475_51_10", true,  "Gallade",     "Mega Gallade",     "Galladite" },
-    { 478, 1, 868,  0,  70,  80,  70, 140, 100, 120, kSlushRush,    kTypeIce,      kTypeGhost,     296, "pm0478_51_00", "pm0478_51_10", true,  "Froslass",    "Mega Froslass",    "Froslassite" },
+    { 478, 1, 868,  0,  70,  80,  70, 140, 100, 120, kSnowWarning,  kTypeIce,      kTypeGhost,     296, "pm0478_51_00", "pm0478_51_10", true,  "Froslass",    "Mega Froslass",    "Froslassite" },
     { 485, 1, 869,  0,  91, 120, 106, 175, 141,  67, kFlashFire,    kTypeFire,     kTypeSteel,    5700, "pm0485_51_00", "pm0485_51_10", true,  "Heatran",     "Mega Heatran",     "Heatranite" },
     { 491, 1, 870,  0,  70, 120, 130, 165, 130,  85, kBadDreams,    kTypeDark,     kTypeDark,     2400, "pm0491_51_00", "pm0491_51_10", true,  "Darkrai",     "Mega Darkrai",     "Darkranite" },
 
@@ -182,7 +181,8 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
 constexpr size_t kMegaRegistryCount = sizeof(kMegaRegistry) / sizeof(kMegaRegistry[0]);
 
 constexpr bool isValidBDSPAbility(int abilityId) {
-    return (abilityId >= 1 && abilityId <= 267) || abilityId == kSharpness;
+    // Luminescent Platinum 2.2F Message/english (english_ss_tokusei) has exactly 268 entries (0..267).
+    return abilityId >= 1 && abilityId <= 267;
 }
 
 constexpr bool validateMegaRegistry() {

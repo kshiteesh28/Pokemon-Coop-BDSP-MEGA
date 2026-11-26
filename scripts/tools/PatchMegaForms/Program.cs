@@ -33,7 +33,7 @@ internal static class Program
         var list = new List<MegaSpec>();
         // { species, form, stone, reqMove, hp, atk, def, spa, spd, spe, ability, type1, type2, weight, ... "Mega ..." }
         var rx = new Regex(
-            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\d+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),[^\n]*?""(Mega [^""]+)""");
+            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\S+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),[^\n]*?""(Mega [^""]+)""");
         foreach (Match m in rx.Matches(txt))
         {
             int abil = abilityMap[m.Groups[8].Value];
@@ -153,7 +153,28 @@ internal static class Program
                 int fIdx = baseRow["form_index"].AsInt;
                 int fMax = baseRow["form_max"].AsInt;
                 bool exists = fIdx > 0 && m.Form < fMax && (fIdx + m.Form - 1) < pArr.Count && pArr[fIdx + m.Form - 1]["monsno"].AsInt == m.Species;
-                if (exists) continue;
+                if (exists)
+                {
+                    // Keep existing Alolan Raichu (26 f=1) untouched; sync stats/ability on newly appended Z-A Mega rows (>= 1466)
+                    int curIdx = fIdx + m.Form - 1;
+                    if (curIdx >= 1466 && !(m.Species == 26 && m.Form == 1))
+                    {
+                        var r = pArr[curIdx];
+                        r["valid_flag"].AsInt = 1;
+                        r["basic_atk"].AsByte = (byte)m.Atk;
+                        r["basic_def"].AsByte = (byte)m.Def;
+                        r["basic_spatk"].AsByte = (byte)m.SpAtk;
+                        r["basic_spdef"].AsByte = (byte)m.SpDef;
+                        r["basic_agi"].AsByte = (byte)m.Spd;
+                        r["type1"].AsByte = (byte)m.Type1;
+                        r["type2"].AsByte = (byte)m.Type2;
+                        r["tokusei1"].AsUShort = (ushort)m.Ability;
+                        r["tokusei2"].AsUShort = (ushort)m.Ability;
+                        r["tokusei3"].AsUShort = (ushort)m.Ability;
+                        r["weight"].AsUShort = (ushort)m.Weight;
+                    }
+                    continue;
+                }
 
                 int newFMax = Math.Max(fMax, m.Form + 1);
                 int newFIdx = pArr.Count;
@@ -243,7 +264,8 @@ internal static class Program
             var catArr = catBf["Catalog.Array"].Children;
             var existingUid = new HashSet<int>(catArr.Select(r => r["UniqueID"].AsInt));
 
-            int addedCat = 0;
+            var byUid = catArr.ToDictionary(r => r["UniqueID"].AsInt);
+            int addedCat = 0, fixedDittoCat = 0;
             foreach (var m in megas)
             {
                 var baseRows = catArr.Where(r => r["MonsNo"].AsInt == m.Species && r["FormNo"].AsInt == 0).ToList();
@@ -251,18 +273,28 @@ internal static class Program
                 {
                     int sexRare = br["UniqueID"].AsInt % 100;
                     int newUid = m.Species * 10000 + m.Form * 100 + sexRare;
-                    if (existingUid.Contains(newUid)) continue;
+                    if (byUid.TryGetValue(newUid, out var existingRow))
+                    {
+                        // Replace vanilla BDSP Ditto placeholder (pm0132_00_00) on Gen 6 Megas (e.g. Mega Absol)
+                        // with the species' real base field bundle so View Pokemon Info never renders Ditto!
+                        if (existingRow["AssetBundleName"].AsString == "pm0132_00_00")
+                        {
+                            existingRow["AssetBundleName"].AsString = br["AssetBundleName"].AsString;
+                            fixedDittoCat++;
+                        }
+                        continue;
+                    }
 
                     var nr = CloneField(br);
                     nr["UniqueID"].AsInt = newUid;
                     nr["FormNo"].AsInt = m.Form;
-                    // Keep base species' field-safe AssetBundleName in static Catalog so UI/Field never
-                    // hits a missing field bundle; DataManager$$GetPokemonCatalog supplies battle bundles.
                     catArr.Add(nr);
+                    byUid[newUid] = nr;
                     existingUid.Add(newUid);
                     addedCat++;
                 }
             }
+            Console.WriteLine($"  [PokemonInfo.Catalog] Fixed {fixedDittoCat} Ditto (pm0132_00_00) placeholders on existing Mega rows");
 
             catArr.Sort((a, b) => a["UniqueID"].AsInt.CompareTo(b["UniqueID"].AsInt));
             catInfo!.SetNewData(catBf);

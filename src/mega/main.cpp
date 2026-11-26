@@ -304,7 +304,7 @@ static_assert(resolveMegaForm(6, 0, kAbsolite, true, false) == -1);
 static_assert(resolveMegaForm(359, 0, kAbsoliteZ, false, false) == -1);
 static_assert(resolveMegaForm(359, 0, kAbsoliteZ, true, true) == -1);
 static_assert(kAbsolite == 677 && kAbsoliteZ == 622);
-static_assert(kMagicBounce == 156 && kSharpness == 292);
+static_assert(kMagicBounce == 156 && kToughClaws == 181 && kSnowWarning == 117);
 
 constexpr uint8_t kMaxBattleClients = 4;
 constexpr uint8_t kMaxBattlePokes = 32;
