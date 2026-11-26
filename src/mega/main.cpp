@@ -39,6 +39,7 @@
 #include "externals/Dpr/Battle/View/UI/BUIWazaButton.h"
 #include "externals/Dpr/Battle/View/UI/BUIWazaList.h"
 #include "externals/Dpr/Message/MessageManager.h"
+#include "externals/Dpr/SubContents/Utils.h"
 #include "externals/Dpr/UI/UIManager.h"
 #include "externals/GameData/DataManager.h"
 #include "externals/Dpr/UI/UIText.h"
@@ -772,11 +773,54 @@ inline bool utf16EqualsAsciiRange(const uint16_t* chars, int32_t len, const char
     return true;
 }
 
+// Resolves a custom Mega bundle name (e.g. "pm0359_02_00") to its guaranteed-valid vanilla field
+// bundle name (e.g. "pm0359_00_00", or "pm0609_11_00" for Chandelure) so UIModelViewController and
+// AssetManager always agree on the exact same FieldPokemonEntity bundle name in Dpr.bin.
+inline bool resolveCustomMegaVanillaFieldName(const uint16_t* nameChars, int32_t nameLen,
+                                              char* outName, size_t outSize) {
+    if (nameChars == nullptr || nameLen <= 0 || nameLen > 64 || outName == nullptr || outSize < 32) {
+        return false;
+    }
+    for (const auto& e : kMegaRegistry) {
+        if (!e.hasCustomModel) {
+            continue;
+        }
+        const bool matched = (e.bundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.bundleName)) ||
+                             (e.shinyBundleName != nullptr && utf16EqualsAsciiRange(nameChars, nameLen, e.shinyBundleName));
+        if (matched) {
+            if (e.species == 609) {
+                std::snprintf(outName, outSize, "pm0609_11_00");
+                return true;
+            }
+            if (e.species > 0 && e.species <= 493) {
+                std::snprintf(outName, outSize, "pm%04d_00_00", e.species);
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+inline System::String::Object* redirectCustomMegaBundleNameOnly(System::String::Object* assetBundleName) {
+    if (assetBundleName == nullptr) {
+        return assetBundleName;
+    }
+    const int32_t len = assetBundleName->fields.m_stringLength;
+    if (len <= 0 || len > 64) {
+        return assetBundleName;
+    }
+    const uint16_t* chars = reinterpret_cast<const uint16_t*>(&assetBundleName->fields.m_firstChar);
+    char vanillaName[32];
+    if (resolveCustomMegaVanillaFieldName(chars, len, vanillaName, sizeof(vanillaName))) {
+        return System::String::Create(vanillaName);
+    }
+    return assetBundleName;
+}
+
 // Safe redirect for UIModelViewController (Party 3D preview & Summary):
-// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/field/pm%04d_00_00" (the species'
-// guaranteed-valid vanilla FieldPokemonEntity bundle in Dpr.bin) for all Gen 1-4 Megas so Party
-// never instantiates a BattlePokemonEntity prefab lacking field animations or collides with
-// BattleView's active battle AssetBundle refcount. Gen 5+ (e.g. Chandelure #609) falls back to battle.
+// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/field/<vanillaFieldBundle>"
+// cleanly at AssetManager entry points as a paired safety net.
 inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String::Object* bundlePath) {
     if (bundlePath == nullptr) {
         return bundlePath;
@@ -791,29 +835,11 @@ inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String:
     if (!utf16EqualsAsciiRange(chars, kPrefixLen, kFieldPrefix)) {
         return bundlePath;
     }
-    const uint16_t* suffix = chars + kPrefixLen;
-    const int32_t suffixLen = len - kPrefixLen;
-    for (const auto& e : kMegaRegistry) {
-        if (!e.hasCustomModel) {
-            continue;
-        }
-        const char* matched = nullptr;
-        if (e.bundleName != nullptr && utf16EqualsAsciiRange(suffix, suffixLen, e.bundleName)) {
-            matched = e.bundleName;
-        } else if (e.shinyBundleName != nullptr && utf16EqualsAsciiRange(suffix, suffixLen, e.shinyBundleName)) {
-            matched = e.shinyBundleName;
-        }
-        if (matched != nullptr) {
-            char targetPath[64];
-            if (e.species == 609) {
-                std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/pm0609_11_00");
-            } else if (e.species > 0 && e.species <= 493) {
-                std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/pm%04d_00_00", e.species);
-            } else {
-                std::snprintf(targetPath, sizeof(targetPath), "pokemons/battle/%s", matched);
-            }
-            return System::String::Create(targetPath);
-        }
+    char vanillaName[32];
+    if (resolveCustomMegaVanillaFieldName(chars + kPrefixLen, len - kPrefixLen, vanillaName, sizeof(vanillaName))) {
+        char targetPath[64];
+        std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/%s", vanillaName);
+        return System::String::Create(targetPath);
     }
     return bundlePath;
 }
@@ -1458,6 +1484,44 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetGrowTable) {
     }
 };
 
+HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadEvolutionTable) {
+    static void Callback(int32_t monsno, uint16_t formno, const void* methodInfo) {
+        const uint16_t safeForm = (formno != mega::kBaseForm && mega::findMegaByForm(monsno, formno) != nullptr)
+                                      ? static_cast<uint16_t>(mega::kBaseForm)
+                                      : formno;
+        Orig(monsno, safeForm, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(CalcTool$$GetTokuseiNo) {
+    static uint16_t Callback(int32_t monsno, uint16_t formno, uint8_t tokuseiIndex, const void* methodInfo) {
+        if (formno != mega::kBaseForm) {
+            if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr) {
+                return static_cast<uint16_t>(md->ability);
+            }
+        }
+        return Orig(monsno, formno, tokuseiIndex, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(SubContents_Utils$$PlayVoice) {
+    static Audio::AudioInstance::Object* Callback(
+        int32_t monsNo, int32_t formNo, int32_t voiceNo,
+        UnityEngine::Events::UnityAction::Object* onFinished, const void* methodInfo) {
+        const int32_t safeForm = (formNo != mega::kBaseForm && mega::findMegaByForm(monsNo, formNo) != nullptr)
+                                     ? mega::kBaseForm
+                                     : formNo;
+        return Orig(monsNo, safeForm, voiceNo, onFinished, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(SubContents_Utils$$GetPokemonAssetbundleName) {
+    static System::String::Object* Callback(System::String::Object* assetBundleName, const void* methodInfo) {
+        auto* resolved = mega::redirectCustomMegaBundleNameOnly(assetBundleName);
+        return Orig(resolved, methodInfo);
+    }
+};
+
 HOOK_DEFINE_TRAMPOLINE(BTL_POKEPARAM$$GetPokeType) {
     static Dpr::Battle::Logic::PokeTypePair::Object Callback(
         Dpr::Battle::Logic::BTL_POKEPARAM::Object* __this, const void* methodInfo) {
@@ -1573,24 +1637,30 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     }
 };
 
-// Prevents Mega Froslass / Mega Absol Z (and all Legends: Z-A Megas) from crashing or showing an Egg icon
-// in Party UI when UIDatabase.PokemonIcon has no valid row or null AssetName for their Mega formNo.
+// Prevents Mega Absol Z / Mega Froslass (and all Legends: Z-A Megas) from crashing or showing an Egg icon
+// in Party UI: never pass out-of-range non-Gen6 Mega formNo to vanilla GetPokemonIconData.
 HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
     static XLSXContent::UIDatabase::SheetPokemonIcon::Object* Callback(
         Dpr::UI::UIManager::Object* __this,
         int32_t monsNo, uint16_t formNo, Pml::Sex sex, Pml::PokePara::RareType rareType, bool isEgg,
         const void* methodInfo) {
-        auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
-        if (__this != nullptr && !isEgg && mega::findMegaByForm(monsNo, formNo) != nullptr) {
-            const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
-                                      (res->fields.AssetName == nullptr) ||
-                                      (res->fields.AssetName->fields.m_stringLength <= 0) ||
-                                      mega::utf16ContainsAscii(res->fields.AssetName, "0000");
-            if (missingOrEgg) {
-                return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
+        if (__this != nullptr && !isEgg && formNo != mega::kBaseForm) {
+            if (const auto* md = mega::findMegaByForm(monsNo, formNo); md != nullptr) {
+                if (!mega::isNativeGen6MegaStone(md->stoneItemId)) {
+                    return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
+                }
+                auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
+                const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
+                                          (res->fields.AssetName == nullptr) ||
+                                          (res->fields.AssetName->fields.m_stringLength <= 0) ||
+                                          mega::utf16ContainsAscii(res->fields.AssetName, "0000");
+                if (missingOrEgg) {
+                    return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
+                }
+                return res;
             }
         }
-        return res;
+        return Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
     }
 };
 
@@ -2031,6 +2101,10 @@ void installSharedPostInitHooks() {
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
     PersonalSystem$$LoadGrowTable::InstallAtOffset(0x024a1700);
     PersonalSystem$$GetGrowTable::InstallAtOffset(0x024a1790);
+    PersonalSystem$$LoadEvolutionTable::InstallAtOffset(0x024a2240);
+    CalcTool$$GetTokuseiNo::InstallAtOffset(0x024ae1f0);
+    SubContents_Utils$$PlayVoice::InstallAtOffset(0x01864180);
+    SubContents_Utils$$GetPokemonAssetbundleName::InstallAtOffset(0x0186b360);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
