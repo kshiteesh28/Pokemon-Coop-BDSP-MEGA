@@ -438,6 +438,7 @@ def build_universal_bone_remapper(
     van_bones: list[str],
     nodes: list[tuple[str, int, int]],
     rig_to_node: dict[int, int],
+    lock_arms_to_torso: bool = False,
 ) -> tuple[dict[int, int], int]:
     import re
     van_idx = {b: i for i, b in enumerate(van_bones)}
@@ -455,6 +456,9 @@ def build_universal_bone_remapper(
     fallback = first_match("Spine1", "Spine", "Waist", "Hips", "Hip", "Origin")
     if fallback is None:
         fallback = 0
+    torso_anchor = first_match("Spine2", "Spine1", "Chest", "Spine", "Waist", "Hips")
+    if torso_anchor is None:
+        torso_anchor = fallback
 
     semantic_candidates: dict[str, tuple[str, ...]] = {
         "waist": ("Hips", "Waist", "Hip", "Pelvis", "Spine1"),
@@ -505,6 +509,8 @@ def build_universal_bone_remapper(
         return False
 
     def resolve_name(nl: str, nidx: int) -> int | None:
+        if lock_arms_to_torso and any(k in nl for k in ("shoulder", "arm", "hand", "finger", "index", "middle", "ring", "thumb", "pinky")) and not any(k in nl for k in ("foot", "toe", "leg", "thigh", "ankle")):
+            return torso_anchor
         if nl in van_lower:
             return van_lower[nl]
         if nl in semantic_candidates:
@@ -995,6 +1001,21 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
 }
 
 
+# Megas whose Z-A arms are already sculpted forward/downward in battle pose while their base BDSP species
+# is T-posed (causing WaitA01 to double-rotate & hyper-extend arms). Bind arms to Spine2 to keep exact proportions.
+LOCK_ARMS_TO_TORSO_PACKS: set[str] = {
+    "pm0260_51_00",  # Mega Swampert
+    "pm0460_51_00",  # Mega Abomasnow
+    "pm0094_51_00",  # Mega Gengar
+    "pm0491_51_00",  # Mega Darkrai
+}
+
+MAX_DIM_CLAMP_BY_PACK: dict[str, float] = {
+    "pm0384_51_00": 11.5,  # Mega Rayquaza (prevents 128m stretched-out blowup)
+    "pm0208_51_00": 7.5,   # Mega Steelix
+}
+
+
 def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) -> None:
     species = spec.species_prefix
     form_id = spec.shiny_bundle if is_shiny else spec.normal_bundle
@@ -1016,7 +1037,9 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
         van_min_y = 0.15
 
     nodes, rig_to_node = parse_trskl(files["trskl"])
-    rig_map, fallback_bone = build_universal_bone_remapper(van_bones, nodes, rig_to_node)
+    rig_map, fallback_bone = build_universal_bone_remapper(
+        van_bones, nodes, rig_to_node, lock_arms_to_torso=(spec.za_pack in LOCK_ARMS_TO_TORSO_PACKS)
+    )
 
     skip_shapes = SKIP_SHAPES_BY_PACK.get(spec.za_pack, set())
     shapes = [s for s in parse_trmsh_and_trmbf(files["trmsh"], files["trmbf"]) if s["name"] not in skip_shapes]
@@ -1089,6 +1112,12 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
         scale = max(0.85 * scale_bbox, min(1.20 * scale_bbox, scale_core))
     else:
         scale = scale_bbox
+
+    if spec.za_pack in MAX_DIM_CLAMP_BY_PACK:
+        all_body_v = np.concatenate([sh["verts"] for sh in shapes if not any(m[0].lower().startswith("eff_") for m in sh["mats"])], axis=0)
+        za_max_dim = float(np.max(np.ptp(all_body_v, axis=0)))
+        if za_max_dim * scale > MAX_DIM_CLAMP_BY_PACK[spec.za_pack]:
+            scale = MAX_DIM_CLAMP_BY_PACK[spec.za_pack] / max(za_max_dim, 1e-3)
 
     ty = van_min_y - za_min_y * scale
 

@@ -1962,46 +1962,61 @@ internal static class Program
         }
         smrInfo.SetNewData(smrBf);
 
-        // For Mega Charizard X (Normal pm0006_01_00 & Shiny pm0006_01_10), tint vanilla animated
-        // FireCore & FireMask tail flame materials to Electric Cyan-Blue!
-        if (formId.StartsWith("pm0006_01_", StringComparison.Ordinal))
+        // Disable & detach ALL leftover vanilla secondary SkinnedMeshRenderers (e.g. Sceptile's BodyASkin,
+        // Venusaur's FlowerSkin/LeafSkin, Blastoise's CoverSkin/CannonSkin, Scizor's Wing*Skins, etc.)
+        // so base-species parts NEVER overlap the Mega model or pop back in during battle animations.
+        // Only Mega Charizard X & Y intentionally retain vanilla FireCore/FireMask tail flames.
+        bool keepCharizardFire = formId.StartsWith("pm0006_01_", StringComparison.Ordinal) ||
+                                 formId.StartsWith("pm0006_02_", StringComparison.Ordinal);
+        int disabledExtraSmrs = 0;
+        foreach (var si in f.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
         {
-            foreach (var si in f.GetAssetsOfType(AssetClassID.SkinnedMeshRenderer))
+            if (si.PathId == smrInfo.PathId) continue;
+            var sb = am.GetBaseField(battleInst, si);
+            var go = am.GetBaseField(battleInst, f.GetAssetInfo(sb["m_GameObject.m_PathID"].AsLong)!);
+            string sName = go["m_Name"].AsString;
+            if (keepCharizardFire && sName.Contains("Fire", StringComparison.OrdinalIgnoreCase))
             {
-                if (si.PathId == smrInfo.PathId) continue;
-                var sb = am.GetBaseField(battleInst, si);
-                var go = am.GetBaseField(battleInst, f.GetAssetInfo(sb["m_GameObject.m_PathID"].AsLong)!);
-                string sName = go["m_Name"].AsString;
-                if (!sName.Contains("Fire", StringComparison.OrdinalIgnoreCase)) continue;
-                foreach (var mRef in sb["m_Materials.Array"].Children)
+                if (formId.StartsWith("pm0006_01_", StringComparison.Ordinal))
                 {
-                    long matPid = mRef["m_PathID"].AsLong;
-                    if (!patchedMatPids.Add(matPid)) continue;
-                    var matInfo = f.GetAssetInfo(matPid);
-                    if (matInfo == null) continue;
-                    var mb = am.GetBaseField(battleInst, matInfo);
-                    string mName = mb["m_Name"].AsString;
-                    mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
-                    foreach (var col in mb["m_SavedProperties.m_Colors.Array"].Children)
+                    foreach (var mRef in sb["m_Materials.Array"].Children)
                     {
-                        string cn = col["first"].AsString;
-                        var cv = col["second"];
-                        float r = cv["r"].AsFloat;
-                        float g = cv["g"].AsFloat;
-                        float b = cv["b"].AsFloat;
-                        float lum = MathF.Max(r, MathF.Max(g, b));
-                        if (r > b + 0.05f && lum > 0.05f)
+                        long matPid = mRef["m_PathID"].AsLong;
+                        if (!patchedMatPids.Add(matPid)) continue;
+                        var matInfo = f.GetAssetInfo(matPid);
+                        if (matInfo == null) continue;
+                        var mb = am.GetBaseField(battleInst, matInfo);
+                        string mName = mb["m_Name"].AsString;
+                        mb["m_Name"].AsString = mName.Replace(baseFormId, formId);
+                        foreach (var col in mb["m_SavedProperties.m_Colors.Array"].Children)
                         {
-                            cv["r"].AsFloat = MathF.Min(0.18f * lum, 1f);
-                            cv["g"].AsFloat = MathF.Min(0.76f * lum, 1f);
-                            cv["b"].AsFloat = MathF.Min(1.00f * lum, 1f);
-                            Console.WriteLine($"  Tinted {mName}.{cn} -> Electric Blue ({cv["r"].AsFloat:F2},{cv["g"].AsFloat:F2},{cv["b"].AsFloat:F2})");
+                            string cn = col["first"].AsString;
+                            var cv = col["second"];
+                            float r = cv["r"].AsFloat;
+                            float g = cv["g"].AsFloat;
+                            float b = cv["b"].AsFloat;
+                            float lum = MathF.Max(r, MathF.Max(g, b));
+                            if (r > b + 0.05f && lum > 0.05f)
+                            {
+                                cv["r"].AsFloat = MathF.Min(0.18f * lum, 1f);
+                                cv["g"].AsFloat = MathF.Min(0.76f * lum, 1f);
+                                cv["b"].AsFloat = MathF.Min(1.00f * lum, 1f);
+                                Console.WriteLine($"  Tinted {mName}.{cn} -> Electric Blue ({cv["r"].AsFloat:F2},{cv["g"].AsFloat:F2},{cv["b"].AsFloat:F2})");
+                            }
                         }
+                        matInfo.SetNewData(mb);
                     }
-                    matInfo.SetNewData(mb);
                 }
+                continue;
             }
+            sb["m_Enabled"].AsBool = false;
+            sb["m_Mesh.m_FileID"].AsInt = 0;
+            sb["m_Mesh.m_PathID"].AsLong = 0;
+            si.SetNewData(sb);
+            disabledExtraSmrs++;
         }
+        if (disabledExtraSmrs > 0)
+            Console.WriteLine($"  Disabled & cleared {disabledExtraSmrs} leftover vanilla secondary SMR(s)");
 
         string tmp = outBundle + ".tmp";
         string tmpLz4 = outBundle + ".lz4";
