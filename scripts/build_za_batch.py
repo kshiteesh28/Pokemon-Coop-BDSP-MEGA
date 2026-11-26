@@ -380,7 +380,11 @@ def composite_material_srgb(
 
     if not is_eye and ao_name in bntx_idx and "white_msk" not in ao_name:
         ao = resize_rgba(decode_bntx_rgba(bntx_idx[ao_name], tmp_dir), out_h, out_w)[:, :, 0:1]
-        rgb_lin = rgb_lin * (0.72 + 0.28 * np.clip(ao, 0.0, 1.0))
+        rgb_lin = rgb_lin * (0.88 + 0.12 * np.clip(ao, 0.0, 1.0))
+
+    # Gentle BDSP anime vibrancy match: Legends Z-A PBR albedos are authored slightly muted/darker for PBR IBL.
+    luma = 0.2126 * rgb_lin[:, :, 0:1] + 0.7152 * rgb_lin[:, :, 1:2] + 0.0722 * rgb_lin[:, :, 2:3]
+    rgb_lin = np.clip((luma + (rgb_lin - luma) * 1.16) * 1.08, 0.0, 1.0)
 
     rgb_srgb = linear_to_srgb(rgb_lin)
     out = np.ones((out_h, out_w, 4), dtype=np.float32)
@@ -1018,6 +1022,14 @@ MAX_DIM_CLAMP_BY_PACK: dict[str, float] = {
     "pm0208_51_00": 7.5,   # Mega Steelix
 }
 
+# Grounded bipeds whose tail tip dips below their foot soles in Z-A bind pose:
+# ground on foot/toe vertices so feet sit firmly on Y = 0.000 instead of floating in mid-air.
+GROUND_ON_FEET_PACKS: set[str] = {
+    "pm0248_51_00",  # Mega Tyranitar
+    "pm0445_51_00",  # Mega Garchomp
+    "pm0445_52_00",  # Mega Garchomp Z
+}
+
 
 def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) -> None:
     species = spec.species_prefix
@@ -1091,6 +1103,18 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
                     acc[2] += wk
 
     za_min_y, za_max_y = min(body_ys), max(body_ys)
+    if spec.za_pack in GROUND_ON_FEET_PACKS:
+        foot_bone_ids = {b["idx"] for b in van_data["bones"] if any(k in b["name"].lower() for k in ("foot", "toe", "ankle"))}
+        foot_ys = []
+        for sh in shapes:
+            if any(m[0].lower().startswith("eff_") for m in sh["mats"]):
+                continue
+            v_arr = sh["verts"]; bi_arr = sh["b_idx"]; bw_arr = sh["b_w"]
+            for vi in range(len(v_arr)):
+                if bw_arr[vi, 0] > 0.4 and rig_map.get(int(bi_arr[vi, 0]), fallback_bone) in foot_bone_ids:
+                    foot_ys.append(float(v_arr[vi, 1]))
+        if foot_ys:
+            za_min_y = min(foot_ys)
     za_h = max(za_max_y - za_min_y, 1e-3)
     scale_bbox = (van_h * spec.height_ratio) / za_h
 

@@ -1247,6 +1247,7 @@ internal static class Program
             texBf["m_IsReadable"].AsBool = false;
             texBf["m_ImageCount"].AsInt = 1;
             texBf["m_TextureDimension"].AsInt = 2;
+            texBf["m_ColorSpace"].AsInt = name.EndsWith("_emi", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
             texBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
             texBf["m_TextureSettings.m_WrapU"].AsInt = 2; // Mirror (matches vanilla BDSP scale=(2,1) wrap=(2,0))
             texBf["m_TextureSettings.m_WrapV"].AsInt = 0; // Repeat
@@ -1740,6 +1741,7 @@ internal static class Program
             texBf["m_IsReadable"].AsBool = false;
             texBf["m_ImageCount"].AsInt = 1;
             texBf["m_TextureDimension"].AsInt = 2;
+            texBf["m_ColorSpace"].AsInt = stem.EndsWith("_emi", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
             texBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
             texBf["m_TextureSettings.m_WrapU"].AsInt = 2; // Mirror
             texBf["m_TextureSettings.m_WrapV"].AsInt = 0; // Repeat
