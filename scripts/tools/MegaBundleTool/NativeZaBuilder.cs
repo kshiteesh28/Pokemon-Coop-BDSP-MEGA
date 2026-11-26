@@ -441,6 +441,36 @@ internal static partial class Program
             texPids[stem] = pid;
         }
 
+        // Inject 4x4 pure-white Linear RGBA32 neutral _AmbientTex so BDSP shader never falls back to 0.5 greyTexture
+        long neutralAmbPid = nextPid++;
+        {
+            var ambBytes = new byte[4 * 4 * 4];
+            Array.Fill(ambBytes, (byte)0xFF);
+            var ambBf = am.GetBaseField(texTemplateInst, vanTexTemplateInfo);
+            ambBf["m_Name"].AsString = $"{formId}_NeutralAmb";
+            ambBf["m_ForcedFallbackFormat"].AsInt = 4;
+            ambBf["m_Width"].AsInt = 4;
+            ambBf["m_Height"].AsInt = 4;
+            ambBf["m_CompleteImageSize"].AsUInt = (uint)ambBytes.Length;
+            ambBf["m_TextureFormat"].AsInt = 4;
+            ambBf["m_MipCount"].AsInt = 1;
+            ambBf["m_IsReadable"].AsBool = false;
+            ambBf["m_ImageCount"].AsInt = 1;
+            ambBf["m_TextureDimension"].AsInt = 2;
+            ambBf["m_ColorSpace"].AsInt = 0; // Linear
+            ambBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
+            ambBf["m_TextureSettings.m_WrapU"].AsInt = 0;
+            ambBf["m_TextureSettings.m_WrapV"].AsInt = 0;
+            ambBf["m_TextureSettings.m_WrapW"].AsInt = 0;
+            ambBf["m_StreamData.offset"].AsULong = 0;
+            ambBf["m_StreamData.size"].AsUInt = 0;
+            ambBf["m_StreamData.path"].AsString = "";
+            ambBf["image data"].AsByteArray = ambBytes;
+            var ambInfo = new AssetFileInfo { PathId = neutralAmbPid, TypeId = (int)AssetClassID.Texture2D, TypeIdOrIndex = texTypeIdx };
+            ambInfo.SetNewData(ambBf);
+            f.Metadata.AddAssetInfo(ambInfo);
+        }
+
         // 6. Build native-rigged Mesh + bind to primary BodySkin SkinnedMeshRenderer
         var smrInfo = FindPrimaryBodySmr(am, battleInst);
         var smrBf = am.GetBaseField(battleInst, smrInfo);
@@ -590,6 +620,7 @@ internal static partial class Program
                 string fk = fl["first"].AsString;
                 if (fk == "_Layer1Enable" || fk == "_Layer1OverLerpValue" || fk == "_RimMaskEnable" ||
                     fk == "_SpecularMaskEnable" || fk == "_SphereMaskEnable" ||
+                    fk == "_OcclusionStrength" || fk == "_BumpScale" ||
                     (!hasCustomEmi && fk == "_EmissionMaskUse"))
                     fl["second"].AsFloat = 0f;
                 if (isEyeMat && fk == "_CullMode")
@@ -601,7 +632,8 @@ internal static partial class Program
                 var tex = texEntry["second.m_Texture"];
                 bool isCol = prop == "_Col0Tex" || prop == "_BaseMap" || prop == "_MainTex";
                 bool isEmi = prop == "_EmissionMaskTex" || prop == "_EmissionMap";
-                if (!isCol && !(isEmi && hasCustomEmi))
+                bool isAmb = prop == "_AmbientTex";
+                if (!isCol && !(isEmi && hasCustomEmi) && !isAmb)
                 {
                     tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = 0;
                     continue;
@@ -623,6 +655,10 @@ internal static partial class Program
                 else if (isEmi && texPids.TryGetValue($"Sub{matSlot}_emi", out long pSubE))
                 {
                     tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pSubE;
+                }
+                else if (isAmb)
+                {
+                    tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = neutralAmbPid;
                 }
             }
 

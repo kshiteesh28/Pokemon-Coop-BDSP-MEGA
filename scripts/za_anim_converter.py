@@ -589,12 +589,15 @@ def compute_posed_metrics(
     foot_mask = is_foot_bone[prim_bi] & (rig_weights[:, 0] > 0.35)
 
     fc = idle_clip["frame_count"]
-    sample_frames = sorted(set([0, fc // 4, fc // 2, (3 * fc) // 4, max(0, fc - 1)]))
     v_h = np.ones((len(rest_verts_unity), 4), dtype=np.float64)
     v_h[:, :3] = rest_verts_unity
 
-    full_mins, full_maxs, core_mins, core_maxs, foot_mins, med_zs = [], [], [], [], [], []
-    for fr in sample_frames:
+    # Evaluate EVERY frame of waitA01 so ground_min_y is the true global minimum across the entire loop
+    # (guarantees zero below-ground clipping on 100% of frames for both grounded and hovering Megas!).
+    sample_stride = 1
+    full_mins, full_maxs, core_mins, core_maxs, med_zs = [], [], [], [], []
+    global_min_y = 999.0
+    for fr in range(0, fc, sample_stride):
         pose_w = evaluate_skeleton_world_mats(skel, idle_clip, fr)
         skin_mats = np.zeros((n_bones, 4, 4), dtype=np.float64)
         for bi, nidx in enumerate(rig_nodes):
@@ -610,26 +613,22 @@ def compute_posed_metrics(
             vp = np.einsum("mij,mj->mi", mats[:, :3, :], v_h[mask])
             posed[mask] += vp * wk[mask, None]
         ys = posed[:, 1]
-        full_mins.append(float(np.percentile(ys, 0.5)))
-        full_maxs.append(float(np.max(ys)))
-        med_zs.append(float(np.median(posed[:, 2])))
-        if np.sum(core_mask) >= max(50, int(0.20 * len(ys))):
-            cys = ys[core_mask]
-            core_mins.append(float(np.percentile(cys, 0.5)))
-            core_maxs.append(float(np.percentile(cys, 99.5)))
-        if np.sum(foot_mask) >= 12:
-            foot_mins.append(float(np.percentile(ys[foot_mask], 2.0)))
+        fmin = float(np.min(ys))
+        if fmin < global_min_y:
+            global_min_y = fmin
+        if fr == 0 or fr == fc // 4 or fr == fc // 2 or fr == (3 * fc) // 4 or fr == fc - 1:
+            full_mins.append(float(np.percentile(ys, 0.5)))
+            full_maxs.append(float(np.max(ys)))
+            med_zs.append(float(np.median(posed[:, 2])))
+            if np.sum(core_mask) >= max(50, int(0.20 * len(ys))):
+                cys = ys[core_mask]
+                core_mins.append(float(np.percentile(cys, 0.5)))
+                core_maxs.append(float(np.percentile(cys, 99.5)))
 
     full_min_y = float(np.median(full_mins))
     full_max_y = float(np.median(full_maxs))
     core_h = (float(np.median(core_maxs)) - float(np.median(core_mins))) if core_maxs else (full_max_y - full_min_y)
-    # Anchor grounding on foot soles ONLY when feet sit within 10% of the model's lowest point
-    # (fixes tail-dip bipeds like Tyranitar while preventing ballgowns like Gardevoir from sinking!).
-    if foot_mins:
-        f_min = float(np.median(foot_mins))
-        ground_min_y = f_min if abs(f_min - full_min_y) < 0.10 * max(full_max_y - full_min_y, 0.5) else full_min_y
-    else:
-        ground_min_y = full_min_y
+    ground_min_y = global_min_y
 
     return {
         "full_min_y": full_min_y,

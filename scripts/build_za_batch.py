@@ -380,11 +380,20 @@ def composite_material_srgb(
 
     if not is_eye and ao_name in bntx_idx and "white_msk" not in ao_name:
         ao = resize_rgba(decode_bntx_rgba(bntx_idx[ao_name], tmp_dir), out_h, out_w)[:, :, 0:1]
-        rgb_lin = rgb_lin * (0.88 + 0.12 * np.clip(ao, 0.0, 1.0))
+        rgb_lin = rgb_lin * (0.90 + 0.10 * np.clip(ao, 0.0, 1.0))
 
-    # Gentle BDSP anime vibrancy match: Legends Z-A PBR albedos are authored slightly muted/darker for PBR IBL.
-    luma = 0.2126 * rgb_lin[:, :, 0:1] + 0.7152 * rgb_lin[:, :, 1:2] + 0.0722 * rgb_lin[:, :, 2:3]
-    rgb_lin = np.clip((luma + (rgb_lin - luma) * 1.16) * 1.08, 0.0, 1.0)
+    # Filmic-to-BDSP anime color grading:
+    # Legends Z-A TRMTR BaseColorLayer1..4 are authored in PBR linear space for ACES Filmic tone mapping.
+    # Deepen darks/midtones (power 1.24) while preserving bright whites (>0.65), and boost chroma (1.42x)
+    # so navies, purples, reds, greens, and golds match BDSP's vibrant anime cel-shaded palette.
+    rgb_lin = np.clip(rgb_lin, 0.0, 1.0)
+    luma_in = 0.2126 * rgb_lin[:, :, 0:1] + 0.7152 * rgb_lin[:, :, 1:2] + 0.0722 * rgb_lin[:, :, 2:3]
+    hi_preserve = np.clip((luma_in - 0.60) / 0.40, 0.0, 1.0)
+    gamma_pow = 1.24 * (1.0 - hi_preserve) + 0.92 * hi_preserve
+    rgb_graded = np.power(np.maximum(rgb_lin, 1e-6), gamma_pow)
+    luma_g = 0.2126 * rgb_graded[:, :, 0:1] + 0.7152 * rgb_graded[:, :, 1:2] + 0.0722 * rgb_graded[:, :, 2:3]
+    sat_boost = 1.15 if is_eye else 1.42
+    rgb_lin = np.clip(luma_g + (rgb_graded - luma_g) * sat_boost, 0.0, 1.0)
 
     rgb_srgb = linear_to_srgb(rgb_lin)
     out = np.ones((out_h, out_w, 4), dtype=np.float32)
