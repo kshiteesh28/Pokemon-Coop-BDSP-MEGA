@@ -1073,6 +1073,175 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
 
     za_to_slot, slot_to_zamats, slot_scale_x = plan_material_slots(used_mats, van_materials)
 
+    if getattr(build_variant, "native_rig", False):
+        import za_anim_converter as zac
+
+        skel_full = zac.parse_trskl_full(files["trskl"])
+        tranms = zac.discover_tranms(pack_dir, spec.za_pack)
+        idle_hit = zac.match_tranm_for_role(tranms, zac.BDSP_ROLE_TO_ZA_PATTERNS[0][2])
+        idle_clip = zac.decode_tranm(idle_hit[1], skel_full, target_fps=30) if idle_hit else None
+
+        # Compute scale, ground offset (ty), and center Z (tz) from the ACTUAL battle-idle posed mesh
+        # so serpentine Megas (Steelix, Gyarados, Rayquaza) scale by their coiled battle height rather
+        # than their flat T-pose length, and grounded Megas sit firmly at Y = van_min_y during idle!
+        all_rest_u = []
+        all_bi_u = []
+        all_bw_u = []
+        for sh in shapes:
+            if any(m[0].lower().startswith("eff_") for m in sh["mats"]):
+                continue
+            if spec.za_pack == "pm0071_51_00" and "leaf" in sh["name"].lower():
+                continue
+            v_rh = sh["verts"]
+            v_u = np.column_stack([-v_rh[:, 0], v_rh[:, 1], v_rh[:, 2]])
+            all_rest_u.append(v_u)
+            all_bi_u.append(sh["b_idx"])
+            all_bw_u.append(sh["b_w"])
+
+        rest_cat = np.concatenate(all_rest_u, axis=0)
+        bi_cat = np.concatenate(all_bi_u, axis=0)
+        bw_cat = np.concatenate(all_bw_u, axis=0)
+
+        if idle_clip is not None:
+            posed_min_y, posed_max_y, posed_med_z = zac.compute_posed_bounds_y(
+                skel_full, rest_cat, bi_cat, bw_cat, idle_clip, frame=0
+            )
+        else:
+            posed_min_y = float(np.min(rest_cat[:, 1]))
+            posed_max_y = float(np.max(rest_cat[:, 1]))
+            posed_med_z = float(np.median(rest_cat[:, 2]))
+
+        posed_h = max(posed_max_y - posed_min_y, 0.20)
+        target_h = van_h * spec.height_ratio
+        scale = target_h / posed_h
+        scale = max(0.35, min(2.50, scale))
+        # Clamp negative vanilla AABB minY (e.g. Steelix -0.448, Aerodactyl -0.322) to >= 0.0 so
+        # coiled/flying Megas never sink beneath the battleground floor!
+        target_min_y = max(van_min_y, 0.0)
+        ty = target_min_y - posed_min_y * scale
+        tz = max(-0.40 * van_h, min(0.40 * van_h, -posed_med_z * scale))
+
+        print(f"  [NATIVE RIG] Scale={scale:.4f} (idle_h={posed_h:.3f}m -> {posed_h*scale:.3f}m, target={target_h:.3f}m, idle_minY={posed_min_y:.3f} -> {target_min_y:.3f}, tz={tz:+.3f}), bones={skel_full['bone_count']}, slots={len(van_materials)}")
+
+        zac.export_rig_and_anims(pack_dir, spec.za_pack, files["trskl"], out_dir, form_id, scale, ty, tz)
+
+        textures_meta: dict[str, list[int]] = {}
+        for slot, zmats in sorted(slot_to_zamats.items()):
+            if len(zmats) == 1:
+                zm = zmats[0]
+                is_eye = "eye" in zm.lower()
+                sz = 256 if is_eye else 512
+                img = composite_za_mat_with_mirror(trmtr[zm], bntx_idx, tmp_dir, sz, sz, is_eye=is_eye)
+            else:
+                cols, rows = za_to_slot[zmats[0]]["grid"]
+                atlas_w = 1024
+                atlas_h = 512 if rows == 1 else 1024
+                tile_w = atlas_w // cols
+                tile_h = atlas_h // rows
+                img = np.zeros((atlas_h, atlas_w, 4), dtype=np.float32)
+                img[:, :, 3] = 1.0
+                for zm in zmats:
+                    c, r = za_to_slot[zm]["cell"]
+                    is_eye = "eye" in zm.lower()
+                    tile = composite_za_mat_with_mirror(trmtr[zm], bntx_idx, tmp_dir, tile_w, tile_h, is_eye=is_eye)
+                    img[r * tile_h : (r + 1) * tile_h, c * tile_w : (c + 1) * tile_w, :] = tile
+            stem = f"Sub{slot}_col"
+            w, h = save_tex_raw_and_png(img, stem, out_dir)
+            textures_meta[stem] = [w, h]
+
+        (out_dir / "textures.json").write_text(json.dumps(textures_meta, indent=2))
+
+        n_bones = skel_full["bone_count"]
+        num_subs = len(van_materials)
+        all_verts = []
+        all_norms = []
+        all_uvs = []
+        all_w = []
+        all_i = []
+        submeshes = [[] for _ in range(num_subs)]
+
+        for sh in shapes:
+            for mname, poly_off, poly_cnt in sh["mats"]:
+                if poly_cnt == 0 or mname not in za_to_slot:
+                    continue
+                info = za_to_slot[mname]
+                sub_idx = info["slot"]
+                u_sc, u_of = info["u_scale"], info["u_off"]
+                v_sc, v_of = info["v_scale"], info["v_off"]
+                sx_van = info["van_scale_x"]
+
+                slice_idx = sh["indices"][poly_off : poly_off + poly_cnt]
+                used = np.unique(slice_idx)
+                local_to_global: dict[int, int] = {}
+
+                for orig_v in used:
+                    v_za = sh["verts"][orig_v]
+                    n_za = sh["norms"][orig_v]
+                    uv_za = sh["uvs"][orig_v]
+
+                    vx = float(-v_za[0] * scale)
+                    vy = float(v_za[1] * scale + ty)
+                    vz = float(v_za[2] * scale + tz)
+                    nx = float(-n_za[0])
+                    ny = float(n_za[1])
+                    nz = float(n_za[2])
+
+                    u_raw = float(uv_za[0])
+                    v_raw = float(uv_za[1])
+                    u_mod = u_raw % 1.0
+                    if u_mod == 0.0 and u_raw > 0.5:
+                        u_mod = 1.0
+                    v_mod = v_raw % 1.0
+                    if v_mod == 0.0 and v_raw > 0.5:
+                        v_mod = 1.0
+                    u_bdsp = (u_mod * u_sc + u_of) / sx_van
+                    v_bdsp = v_mod * v_sc + v_of
+
+                    bi_raw = sh["b_idx"][orig_v]
+                    bw_raw = sh["b_w"][orig_v]
+                    iv = [0, 0, 0, 0]
+                    wv = [0.0, 0.0, 0.0, 0.0]
+                    tot = 0.0
+                    for k in range(4):
+                        wk = float(bw_raw[k])
+                        if wk > 1e-6:
+                            iv[k] = min(max(int(bi_raw[k]), 0), max(0, n_bones - 1))
+                            wv[k] = wk
+                            tot += wk
+                    if tot > 1e-6:
+                        wv = [w / tot for w in wv]
+                    else:
+                        iv[0] = 0
+                        wv[0] = 1.0
+
+                    g_idx = len(all_verts)
+                    local_to_global[int(orig_v)] = g_idx
+                    all_verts.append([vx, vy, vz])
+                    all_norms.append([nx, ny, nz])
+                    all_uvs.append([u_bdsp, v_bdsp])
+                    all_w.append(wv)
+                    all_i.append(iv)
+
+                s_out = submeshes[sub_idx]
+                for t in range(0, len(slice_idx), 3):
+                    a = local_to_global[int(slice_idx[t])]
+                    b = local_to_global[int(slice_idx[t + 1])]
+                    c = local_to_global[int(slice_idx[t + 2])]
+                    s_out.extend([a, c, b])
+
+        mesh_json = out_dir / f"{form_id}_mesh.json"
+        mesh_json.write_text(json.dumps({
+            "verts": all_verts,
+            "normals": all_norms,
+            "uvs": all_uvs,
+            "weights": all_w,
+            "indices": all_i,
+            "submeshes": submeshes,
+        }))
+        tris_total = sum(len(s) // 3 for s in submeshes)
+        print(f"  Wrote {mesh_json}: verts={len(all_verts)}, tris={tris_total}, submesh_tris={[len(s)//3 for s in submeshes]}")
+        return
+
     # Compute skeleton-anchored core-body scale, Y grounding, and Z alignment (prevents tall horns/wings
     # from shrinking body proportions like Mega Heracross 0.66x, and aligns spine/hip pivots in Z).
     body_ys = []
@@ -1296,12 +1465,14 @@ def main() -> None:
     argv = sys.argv
     raw_args = argv[argv.index("--") + 1 :] if "--" in argv else []
     no_render = "--no-render" in raw_args
+    native_rig = "--native-rig" in raw_args
     build_variant.no_render = no_render
-    targets = [a for a in raw_args if a != "--no-render"]
+    build_variant.native_rig = native_rig
+    targets = [a for a in raw_args if a not in ("--no-render", "--native-rig")]
     by_key = {f"pm{m.species:04d}_{m.form:02d}": m for m in MEGA_CATALOG}
     selected = [by_key[t] for t in targets] if targets else []
     if not selected:
-        raise SystemExit("Pass target form keys after --, e.g. -- pm0398_01 pm0445_01 ...")
+        raise SystemExit("Pass target form keys after --, e.g. -- --native-rig pm0254_01 ...")
 
     for spec in selected:
         pack_dir = ZA_ROOT / spec.za_pack

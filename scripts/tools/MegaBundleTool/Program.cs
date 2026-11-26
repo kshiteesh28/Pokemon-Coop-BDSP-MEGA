@@ -12,7 +12,7 @@ using AssetsTools.NET.Extra;
 
 namespace MegaBundleTool;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly string RepoRoot =
         "/Users/kshiteesh/Developer/Pokemon-mod-coop/Pokemon-Coop-version";
@@ -28,7 +28,7 @@ internal static class Program
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         if (args.Length == 0)
         {
-            Console.Error.WriteLine("Usage: MegaBundleTool <rebuild-lumi|verify-and-dump> [args...]");
+            Console.Error.WriteLine("Usage: MegaBundleTool <rebuild-lumi|verify-and-dump|build-native-za-bundle|verify-native-bundle> [args...]");
             return 2;
         }
 
@@ -40,6 +40,8 @@ internal static class Program
             "dump-vanilla-species" => DumpVanillaSpecies(args.Skip(1).ToArray()),
             "build-mega-x-bundle" => BuildMegaXBundle(args.Skip(1).ToArray()),
             "build-species-bundle" => BuildSpeciesBundle(args.Skip(1).ToArray()),
+            "build-native-za-bundle" => BuildNativeZaBundle(args.Skip(1).ToArray()),
+            "verify-native-bundle" => VerifyNativeBundle(args.Skip(1).ToArray()),
             "inspect-mats" => InspectMats(args.Skip(1).ToArray()),
             _ => throw new ArgumentException($"Unknown command: {args[0]}")
         };
