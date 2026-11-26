@@ -771,9 +771,11 @@ inline bool utf16EqualsAsciiRange(const uint16_t* chars, int32_t len, const char
     return true;
 }
 
-// Fast, zero-allocation redirect for UIModelViewController (Party 3D preview & Summary):
-// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/battle/<customMegaBundle>"
-// cleanly at AssetManager entry points without fragile mid-function inline hooks.
+// Safe redirect for UIModelViewController (Party 3D preview & Summary):
+// Rewrites "pokemons/field/<customMegaBundle>" -> "pokemons/field/pm%04d_00_00" (the species'
+// guaranteed-valid vanilla FieldPokemonEntity bundle in Dpr.bin) for all Gen 1-4 Megas so Party
+// never instantiates a BattlePokemonEntity prefab lacking field animations or collides with
+// BattleView's active battle AssetBundle refcount. Gen 5+ (e.g. Chandelure #609) falls back to battle.
 inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String::Object* bundlePath) {
     if (bundlePath == nullptr) {
         return bundlePath;
@@ -801,9 +803,13 @@ inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String:
             matched = e.shinyBundleName;
         }
         if (matched != nullptr) {
-            char battlePath[64];
-            std::snprintf(battlePath, sizeof(battlePath), "pokemons/battle/%s", matched);
-            return System::String::Create(battlePath);
+            char targetPath[64];
+            if (e.species > 0 && e.species <= 493) {
+                std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/pm%04d_00_00", e.species);
+            } else {
+                std::snprintf(targetPath, sizeof(targetPath), "pokemons/battle/%s", matched);
+            }
+            return System::String::Create(targetPath);
         }
     }
     return bundlePath;
@@ -1373,11 +1379,16 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
             if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr) {
                 auto* base = Orig(monsno, mega::kBaseForm, methodInfo);
                 if (base != nullptr && base->klass != nullptr) {
+                    auto* klass = reinterpret_cast<Il2CppClass*>(base->klass);
+                    const uint32_t instSize = klass->_2.instance_size;
+                    const size_t availBytes = (instSize > sizeof(Il2CppObject)) ? (instSize - sizeof(Il2CppObject)) : 0;
+                    const size_t copyBytes = (availBytes < sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields))
+                                                 ? availBytes
+                                                 : sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields);
                     auto* clone = reinterpret_cast<XLSXContent::PersonalTable::SheetPersonal::Object*>(
-                        il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
-                    if (clone != nullptr) {
-                        std::memcpy(&clone->fields, &base->fields,
-                                    sizeof(XLSXContent::PersonalTable::SheetPersonal::Fields));
+                        il2cpp_object_new(klass));
+                    if (clone != nullptr && copyBytes > 0) {
+                        std::memcpy(&clone->fields, &base->fields, copyBytes);
                         // Mega Evolution NEVER changes Base HP; keep base->fields.basic_hp intact
                         // so Luminescent Platinum base-HP buffs (e.g. Absol) never drop HP on Mega Evolve.
                         clone->fields.basic_atk = static_cast<uint8_t>(md->attack);
@@ -1402,26 +1413,47 @@ HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetPersonalData) {
 
 HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadPersonalData) {
     static void Callback(int32_t monsno, uint16_t formno, const void* methodInfo) {
-        Orig(monsno, formno, methodInfo);
-        if (formno != mega::kBaseForm) {
-            if (const auto* md = mega::findMegaByForm(monsno, formno); md != nullptr) {
-                if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
-                    pClass != nullptr && pClass->static_fields != nullptr) {
-                    auto* cur = pClass->static_fields->s_PersonalData;
-                    const bool alreadyPatched = cur != nullptr &&
-                                                cur->fields.basic_atk == static_cast<uint8_t>(md->attack) &&
-                                                cur->fields.basic_agi == static_cast<uint8_t>(md->speed) &&
-                                                cur->fields.type1 == md->primaryType &&
-                                                cur->fields.type2 == md->secondaryType;
-                    if (!alreadyPatched) {
-                        if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno);
-                            patched != nullptr) {
-                            pClass->static_fields->s_PersonalData = patched;
-                        }
+        const auto* md = (formno != mega::kBaseForm) ? mega::findMegaByForm(monsno, formno) : nullptr;
+        // Never pass out-of-range Mega formNo (e.g. Froslass form 1, Absol Z form 2) to vanilla LoadPersonalData.
+        Orig(monsno, (md != nullptr) ? static_cast<uint16_t>(mega::kBaseForm) : formno, methodInfo);
+        if (md != nullptr) {
+            if (auto* pClass = Pml::Personal::PersonalSystem::getClass();
+                pClass != nullptr && pClass->static_fields != nullptr) {
+                auto* cur = pClass->static_fields->s_PersonalData;
+                const bool alreadyPatched = cur != nullptr &&
+                                            cur->fields.basic_atk == static_cast<uint8_t>(md->attack) &&
+                                            cur->fields.basic_agi == static_cast<uint8_t>(md->speed) &&
+                                            cur->fields.type1 == md->primaryType &&
+                                            cur->fields.type2 == md->secondaryType;
+                if (!alreadyPatched) {
+                    if (auto* patched = Pml::Personal::PersonalSystem::GetPersonalData(monsno, formno);
+                        patched != nullptr) {
+                        pClass->static_fields->s_PersonalData = patched;
                     }
                 }
             }
         }
+    }
+};
+
+// Mega Evolution never changes a Pokemon's EXP growth curve; normalize Mega formNo -> kBaseForm so
+// Party / Summary / Battle Situation EXP bars never index GrowTable out of bounds.
+HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$LoadGrowTable) {
+    static void Callback(int32_t monsno, uint16_t formno, const void* methodInfo) {
+        const uint16_t safeForm = (formno != mega::kBaseForm && mega::findMegaByForm(monsno, formno) != nullptr)
+                                      ? static_cast<uint16_t>(mega::kBaseForm)
+                                      : formno;
+        Orig(monsno, safeForm, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(PersonalSystem$$GetGrowTable) {
+    static XLSXContent::GrowTable::SheetData::Object* Callback(
+        int32_t monsno, uint16_t formno, const void* methodInfo) {
+        const uint16_t safeForm = (formno != mega::kBaseForm && mega::findMegaByForm(monsno, formno) != nullptr)
+                                      ? static_cast<uint16_t>(mega::kBaseForm)
+                                      : formno;
+        return Orig(monsno, safeForm, methodInfo);
     }
 };
 
@@ -1512,11 +1544,16 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
             if (const auto* md = mega::findMegaByForm(monsNo, formNo); md != nullptr) {
                 auto* base = Orig(monsNo, mega::kBaseForm, sex, isRare, isEgg, methodInfo);
                 if (base != nullptr && base->klass != nullptr) {
+                    auto* klass = reinterpret_cast<Il2CppClass*>(base->klass);
+                    const uint32_t instSize = klass->_2.instance_size;
+                    const size_t availBytes = (instSize > sizeof(Il2CppObject)) ? (instSize - sizeof(Il2CppObject)) : 0;
+                    const size_t copyBytes = (availBytes < sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields))
+                                                 ? availBytes
+                                                 : sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields);
                     auto* clone = reinterpret_cast<XLSXContent::PokemonInfo::SheetCatalog::Object*>(
-                        il2cpp_object_new(reinterpret_cast<Il2CppClass*>(base->klass)));
-                    if (clone != nullptr) {
-                        std::memcpy(&clone->fields, &base->fields,
-                                    sizeof(XLSXContent::PokemonInfo::SheetCatalog::Fields));
+                        il2cpp_object_new(klass));
+                    if (clone != nullptr && copyBytes > 0) {
+                        std::memcpy(&clone->fields, &base->fields, copyBytes);
                         clone->fields.FormNo = formNo;
                         clone->fields.Rare = isRare;
                         // Crash guard: ONLY swap AssetBundleName when custom Switch bundle is packed & registered in Dpr.bin.
@@ -1535,8 +1572,8 @@ HOOK_DEFINE_TRAMPOLINE(DataManager$$GetPokemonCatalog) {
     }
 };
 
-// Prevents Mega Absol Z (and all 17 Legends: Z-A Megas) from showing as an Egg icon in Party UI
-// when Luminescent Platinum's UIDatabase.PokemonIcon table has no icon row for their Mega formNo.
+// Prevents Mega Froslass / Mega Absol Z (and all Legends: Z-A Megas) from crashing or showing an Egg icon
+// in Party UI when UIDatabase.PokemonIcon has no valid row or null AssetName for their Mega formNo.
 HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
     static XLSXContent::UIDatabase::SheetPokemonIcon::Object* Callback(
         Dpr::UI::UIManager::Object* __this,
@@ -1545,8 +1582,9 @@ HOOK_DEFINE_TRAMPOLINE(UIManager$$GetPokemonIconData) {
         auto* res = Orig(__this, monsNo, formNo, sex, rareType, isEgg, methodInfo);
         if (__this != nullptr && !isEgg && mega::findMegaByForm(monsNo, formNo) != nullptr) {
             const bool missingOrEgg = (res == nullptr) || (res->fields.UniqueID == 0) ||
-                                      (res->fields.AssetName != nullptr &&
-                                       mega::utf16ContainsAscii(res->fields.AssetName, "0000"));
+                                      (res->fields.AssetName == nullptr) ||
+                                      (res->fields.AssetName->fields.m_stringLength <= 0) ||
+                                      mega::utf16ContainsAscii(res->fields.AssetName, "0000");
             if (missingOrEgg) {
                 return Orig(__this, monsNo, mega::kBaseForm, sex, rareType, false, methodInfo);
             }
@@ -1990,6 +2028,8 @@ void installSharedPostInitHooks() {
     CoreParam$$GetType2::InstallAtOffset(0x0204aaf0);
     PersonalSystem$$GetPersonalData::InstallAtOffset(0x024a0ca0);
     PersonalSystem$$LoadPersonalData::InstallAtOffset(0x024a0d50);
+    PersonalSystem$$LoadGrowTable::InstallAtOffset(0x024a1700);
+    PersonalSystem$$GetGrowTable::InstallAtOffset(0x024a1790);
     DataManager$$GetPokemonCatalog::InstallAtOffset(0x02cc76a0);
     CheckUnbreakablePokeItem::InstallAtOffset(0x01d0d780);
     MessageManager$$GetNameMessage::InstallAtOffset(0x0210ce50);
