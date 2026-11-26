@@ -738,30 +738,30 @@ def plan_material_slots(
 
     # Filter out VFX slash/aura quads (eff_*)
     active_za = [m for m in za_mat_names if not m.lower().startswith("eff_")]
-    eye_za = [m for m in active_za if "eye" in m.lower()]
-    body_za = [m for m in active_za if "eye" not in m.lower()]
 
-    eye_slots = [m for m in unique_slots if "eye" in m["name"].lower()]
-    body_slots = [m for m in unique_slots if "eye" not in m["name"].lower()]
-    if not body_slots:
-        body_slots = unique_slots
+    # CRITICAL: BDSP battle animations keyframe vertical UV offsets (+0.25/+0.50/+0.75) on
+    # Eye/LEye/REye/AEye/BEye/Mouth/Iris material slots for vanilla 4-frame blink/mouth sheets.
+    # Legends: Z-A eye/mouth textures are single-frame, so mapping them into BDSP's UV-animated
+    # facial slots causes eyes to slide up and down randomly (e.g., Mega Dragonite). Route ALL
+    # Z-A materials strictly into static Body* material slots, leaving UV-animated slots empty.
+    def _is_uv_anim_or_special(mat_name: str) -> bool:
+        part = mat_name.split("-")[-1].lower()
+        return (
+            part.startswith(("eye", "leye", "reye", "aeye", "beye", "mouth", "iris", "bug"))
+            or part.endswith(("eye", "mouth", "iris"))
+        )
+
+    static_slots = [m for m in unique_slots if m["name"].split("-")[-1].lower().startswith("body")]
+    if not static_slots:
+        static_slots = [m for m in unique_slots if not _is_uv_anim_or_special(m["name"])]
+    if not static_slots:
+        static_slots = unique_slots
 
     slot_to_zamats: dict[int, list[str]] = {}
 
-    # Assign eye materials
-    if eye_slots:
-        l_slot = next((m for m in eye_slots if "leye" in m["name"].lower()), eye_slots[0])
-        r_slot = next((m for m in eye_slots if "reye" in m["name"].lower()), eye_slots[0])
-        for zm in eye_za:
-            target = l_slot if "l_eye" in zm.lower() else r_slot
-            slot_to_zamats.setdefault(target["slot"], []).append(zm)
-    else:
-        # Species like Darkrai has no separate Eye material slot -> include eye in body_za for atlasing
-        body_za = body_za + eye_za
-
-    # Assign body materials round-robin across unique body_slots (1:1 if enough slots!)
-    for idx, zm in enumerate(body_za):
-        target = body_slots[idx % len(body_slots)]
+    # Assign all active Z-A materials (including eyes & mouths) round-robin across static slots
+    for idx, zm in enumerate(active_za):
+        target = static_slots[idx % len(static_slots)]
         slot_to_zamats.setdefault(target["slot"], []).append(zm)
 
     # Compute UV tile transforms for each slot
@@ -981,6 +981,17 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
     "pm0376_51_00": {"pm0376_51_00_eye_b_mesh_shape"},
     "pm0428_51_00": {"pm0428_51_00_eyelid_mesh_shape"},
     "pm0485_51_00": {"pm0485_51_00_eyelid_mesh_shape"},
+    # Regression-audit fixes: skip overlapping closed wings (Staraptor) and eyelid overlays (Chandelure)
+    "pm0398_51_00": {
+        "pm0398_51_00_left_closed_wing_mesh_shape",
+        "pm0398_51_00_right_closed_wing_mesh_shape",
+    },
+    "pm0609_51_00": {
+        "pm0609_51_00_eyelid_a_mesh_shape",
+        "pm0609_51_00_eyelid_b_mesh_shape",
+        "pm0609_51_00_eyelid_c_mesh_shape",
+        "pm0609_51_00_eyelid_d_mesh_shape",
+    },
 }
 
 
@@ -1075,7 +1086,7 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
     if len(implied_scales) >= 2:
         implied_scales.sort()
         scale_core = implied_scales[len(implied_scales) // 2]
-        scale = max(0.72 * scale_bbox, min(1.48 * scale_bbox, scale_core))
+        scale = max(0.85 * scale_bbox, min(1.20 * scale_bbox, scale_core))
     else:
         scale = scale_bbox
 
