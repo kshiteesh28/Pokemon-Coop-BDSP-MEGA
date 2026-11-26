@@ -1012,6 +1012,10 @@ inline const MegaSpeciesEntry* chooseBestTrainerMegaEntry(Dpr::Battle::Logic::BT
 
 // Lazily equips an NPC trainer's ace Mega-capable Pokemon using BDSP's verified live BTL_PARTY
 // (never touches BATTLE_SETUP_PARAM::fields.party during SetupBattleTrainer).
+// Rules:
+//  1. If any party member ALREADY holds its matching Mega Stone in TrainerTable (including Fantina's
+//     Lv. 32-33 Gengar and all X/Y Mega bosses), respect it verbatim and never equip a second stone.
+//  2. Otherwise, only auto-equip a Mega Stone when the trainer's highest-level Pokemon is > Lv. 33.
 inline void equipTrainerMegaStonesForClient(Dpr::Battle::Logic::BTL_PARTY::Object* party, uint8_t clientID) {
     if (clientID == 0 || clientID >= kMaxBattleClients || gTrainerStonesEquipped[clientID]) {
         return;
@@ -1026,37 +1030,44 @@ inline void equipTrainerMegaStonesForClient(Dpr::Battle::Logic::BTL_PARTY::Objec
         return;
     }
 
+    constexpr uint8_t kAutoMegaLevelThreshold = 33;
+    uint8_t maxPartyLevel = 0;
     Dpr::Battle::Logic::BTL_POKEPARAM::Object* bestBpp = nullptr;
     const MegaSpeciesEntry* bestEntry = nullptr;
     uint8_t bestLevel = 0;
-    bool bestAlreadyHasStone = false;
 
     for (uint8_t i = 0; i < count && i < 6 && i < arrLen; ++i) {
         auto* bpp = party->GetMemberDataConst(i);
-        if (bpp == nullptr || bpp->fields.m_coreParam == nullptr ||
-            bpp->IsDead() || bpp->GetFormNo() != kBaseForm) {
+        if (bpp == nullptr || bpp->fields.m_coreParam == nullptr) {
+            continue;
+        }
+        const uint8_t lv = bpp->fields.m_coreParam->fields.level;
+        if (lv > maxPartyLevel) {
+            maxPartyLevel = lv;
+        }
+        // Respect pre-equipped Mega Stones from TrainerTable (even if fainted) without overwriting or double-equipping.
+        if (findMegaByStone(bpp->GetMonsNo(), kBaseForm, bpp->GetItem()) != nullptr) {
+            return;
+        }
+        if (bpp->IsDead() || bpp->GetFormNo() != kBaseForm) {
             continue;
         }
         const auto* candidate = chooseBestTrainerMegaEntry(bpp);
         if (candidate == nullptr) {
             continue;
         }
-        const bool alreadyHasStone = (candidate->stoneItemId != 0 &&
-                                      bpp->GetItem() == candidate->stoneItemId);
-        const uint8_t lv = bpp->fields.m_coreParam->fields.level;
-        // Prefer a Pokemon already holding its Mega Stone; otherwise pick the highest-level ace
-        // (ties broken by later party slot, matching official Gym Leader / E4 / Champion ace order).
-        if (bestBpp == nullptr ||
-            (alreadyHasStone && !bestAlreadyHasStone) ||
-            (alreadyHasStone == bestAlreadyHasStone && lv >= bestLevel)) {
+        if (bestBpp == nullptr || lv >= bestLevel) {
             bestBpp = bpp;
             bestEntry = candidate;
             bestLevel = lv;
-            bestAlreadyHasStone = alreadyHasStone;
         }
     }
 
-    if (bestBpp != nullptr && bestEntry != nullptr && bestEntry->stoneItemId != 0 && !bestAlreadyHasStone) {
+    if (maxPartyLevel <= kAutoMegaLevelThreshold) {
+        return;
+    }
+
+    if (bestBpp != nullptr && bestEntry != nullptr && bestEntry->stoneItemId != 0) {
         bestBpp->fields.m_coreParam->fields.item = bestEntry->stoneItemId;
         if (auto* srcPoke = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(bestBpp->GetSrcData());
             srcPoke != nullptr && !srcPoke->IsNull()) {
@@ -1951,6 +1962,9 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
     static void Callback(Dpr::Battle::Logic::BATTLE_SETUP_PARAM::Object* battleSetupParam, int32_t arenaID,
                          int32_t mapAttrib, int32_t weatherType, int32_t rule, int32_t enemyID0, int32_t enemyID1,
                          int32_t partnerID, const void* methodInfo) {
+        if (!mega::gItemTablePatched.load(std::memory_order_acquire)) {
+            mega::patchItemTableInMemory();
+        }
         mega::revertMegaFormInParty();
         mega::gIsTrainerBattle = true;
         mega::gMegaBattleAllowed = !(rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI) ||
