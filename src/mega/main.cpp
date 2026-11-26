@@ -704,10 +704,11 @@ inline void patchItemTableInMemory() {
     for (const auto& s : kAllMegaStones) {
         if (s.itemId < items->max_length) {
             auto* target = items->m_Items[s.itemId];
-            const bool keepNativeIcon = ((s.itemId >= 656 && s.itemId <= 685) ||
-                                         (s.itemId >= 752 && s.itemId <= 764) ||
-                                         (s.itemId >= 767 && s.itemId <= 770)) &&
-                                        target != nullptr && target->fields.iconid > 0;
+            // Preserve any valid native Gen 6 Mega Stone icon already patched into personal_masterdatas.
+            const int32_t curIcon = (target != nullptr) ? target->fields.iconid : 0;
+            const bool keepNativeIcon = (curIcon >= 656 && curIcon <= 685) ||
+                                        (curIcon >= 752 && curIcon <= 764) ||
+                                        (curIcon >= 767 && curIcon <= 770);
             auto* iconTmpl = (!keepNativeIcon && s.fallbackIconId < items->max_length)
                                  ? items->m_Items[s.fallbackIconId]
                                  : nullptr;
@@ -804,7 +805,9 @@ inline System::String::Object* redirectCustomMegaFieldBundlePath(System::String:
         }
         if (matched != nullptr) {
             char targetPath[64];
-            if (e.species > 0 && e.species <= 493) {
+            if (e.species == 609) {
+                std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/pm0609_11_00");
+            } else if (e.species > 0 && e.species <= 493) {
                 std::snprintf(targetPath, sizeof(targetPath), "pokemons/field/pm%04d_00_00", e.species);
             } else {
                 std::snprintf(targetPath, sizeof(targetPath), "pokemons/battle/%s", matched);
@@ -1315,11 +1318,9 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
         }
         if (prmID == Pml::Item::ItemData::PrmID::ICONID) {
             if (stone != nullptr) {
-                if (mega::isNativeGen6MegaStone(itemno)) {
-                    const int32_t nativeIcon = Orig(itemno, prmID, methodInfo);
-                    if (nativeIcon > 0) {
-                        return nativeIcon;
-                    }
+                const int32_t nativeIcon = Orig(itemno, prmID, methodInfo);
+                if (nativeIcon > 0 && mega::isNativeGen6MegaStone(nativeIcon)) {
+                    return nativeIcon;
                 }
                 return Orig(stone->fallbackIconId, prmID, methodInfo);
             }
