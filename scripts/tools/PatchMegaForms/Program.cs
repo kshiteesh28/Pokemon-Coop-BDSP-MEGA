@@ -12,7 +12,7 @@ internal static class Program
 {
     private sealed record MegaSpec(
         int Species, int Form, int Atk, int Def, int SpAtk, int SpDef, int Spd,
-        int Ability, int Type1, int Type2, int Weight, string MegaName);
+        int Ability, int Type1, int Type2, int Weight, string BundleName, string ShinyBundleName, string MegaName);
 
     private static readonly Dictionary<string, int> TypeMap = new()
     {
@@ -31,9 +31,9 @@ internal static class Program
             abilityMap[m.Groups[1].Value] = int.Parse(m.Groups[2].Value);
 
         var list = new List<MegaSpec>();
-        // { species, form, stone, reqMove, hp, atk, def, spa, spd, spe, ability, type1, type2, weight, ... "Mega ..." }
+        // { species, form, stone, reqMove, hp, atk, def, spa, spd, spe, ability, type1, type2, weight, "bundle", "shinyBundle", true, "species", "Mega ..." }
         var rx = new Regex(
-            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\S+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),[^\n]*?""(Mega [^""]+)""");
+            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\S+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),\s*""([^""]+)"",\s*""([^""]+)"",[^\n]*?""(Mega [^""]+)""");
         foreach (Match m in rx.Matches(txt))
         {
             int abil = abilityMap[m.Groups[8].Value];
@@ -49,7 +49,9 @@ internal static class Program
                 int.Parse(m.Groups[7].Value),
                 abil, t1, t2,
                 int.Parse(m.Groups[11].Value),
-                m.Groups[12].Value));
+                m.Groups[12].Value,
+                m.Groups[13].Value,
+                m.Groups[14].Value));
         }
         return list;
     }
@@ -265,22 +267,22 @@ internal static class Program
             var existingUid = new HashSet<int>(catArr.Select(r => r["UniqueID"].AsInt));
 
             var byUid = catArr.ToDictionary(r => r["UniqueID"].AsInt);
-            int addedCat = 0, fixedDittoCat = 0;
+            int addedCat = 0, updatedMegaBundleCat = 0;
             foreach (var m in megas)
             {
                 var baseRows = catArr.Where(r => r["MonsNo"].AsInt == m.Species && r["FormNo"].AsInt == 0).ToList();
                 foreach (var br in baseRows)
                 {
                     int sexRare = br["UniqueID"].AsInt % 100;
+                    bool isShiny = (sexRare % 2) == 1;
+                    string targetBundle = isShiny ? m.ShinyBundleName : m.BundleName;
                     int newUid = m.Species * 10000 + m.Form * 100 + sexRare;
                     if (byUid.TryGetValue(newUid, out var existingRow))
                     {
-                        // Replace vanilla BDSP Ditto placeholder (pm0132_00_00) on Gen 6 Megas (e.g. Mega Absol)
-                        // with the species' real base field bundle so View Pokemon Info never renders Ditto!
-                        if (existingRow["AssetBundleName"].AsString == "pm0132_00_00")
+                        if (existingRow["AssetBundleName"].AsString != targetBundle)
                         {
-                            existingRow["AssetBundleName"].AsString = br["AssetBundleName"].AsString;
-                            fixedDittoCat++;
+                            existingRow["AssetBundleName"].AsString = targetBundle;
+                            updatedMegaBundleCat++;
                         }
                         continue;
                     }
@@ -288,13 +290,14 @@ internal static class Program
                     var nr = CloneField(br);
                     nr["UniqueID"].AsInt = newUid;
                     nr["FormNo"].AsInt = m.Form;
+                    nr["AssetBundleName"].AsString = targetBundle;
                     catArr.Add(nr);
                     byUid[newUid] = nr;
                     existingUid.Add(newUid);
                     addedCat++;
                 }
             }
-            Console.WriteLine($"  [PokemonInfo.Catalog] Fixed {fixedDittoCat} Ditto (pm0132_00_00) placeholders on existing Mega rows");
+            Console.WriteLine($"  [PokemonInfo.Catalog] Updated {updatedMegaBundleCat} existing Mega rows to custom 3D Mega bundles");
 
             catArr.Sort((a, b) => a["UniqueID"].AsInt.CompareTo(b["UniqueID"].AsInt));
             catInfo!.SetNewData(catBf);
