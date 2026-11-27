@@ -47,3 +47,6 @@ socket.log
 
 scripts/tools/*/bin/
 scripts/tools/*/obj/
+
+# Go module file for the co-op server (*.mod above is for Fortran)
+!server/go.mod
