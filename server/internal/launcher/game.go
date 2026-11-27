@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kshiteesh28/Pokemon-Coop-BDSP-MEGA/server/internal/config"
 )
@@ -31,6 +32,9 @@ type GameView struct {
 	Checks  []Check  `json:"checks"`
 	Ready   bool     `json:"ready"`
 	Mods    []string `json:"mods"`
+	// What the in-game co-op client last reported (sd:/config/pokemon-coop-status.txt).
+	CoopStatus string `json:"coop_status"`
+	CoopAge    int    `json:"coop_age_sec"` // seconds since the game last updated it; -1 = never
 }
 
 // ryujinxDataDir is where Ryujinx keeps keys, mods and the SD card. A
@@ -147,7 +151,7 @@ func gameView(c config.Client) GameView {
 	add("game", "Brilliant Diamond game file", gameOK, map[bool]string{true: filepath.Base(c.Game), false: "Choose your Brilliant Diamond .nsp/.xci"}[gameOK])
 
 	modDir := filepath.Join(data, "mods", "contents", BDSPTitleID)
-	lumi, mega, zipLeft := "", false, false
+	lumi, mega, coopMod, zipLeft := "", false, false, false
 	if ents, err := os.ReadDir(modDir); err == nil {
 		for _, e := range ents {
 			if !e.IsDir() {
@@ -164,6 +168,9 @@ func gameView(c config.Client) GameView {
 			if isFile(filepath.Join(p, "exefs", "subsdk2")) {
 				mega = true
 			}
+			if isFile(filepath.Join(p, "exefs", "subsdk3")) {
+				coopMod = true
+			}
 		}
 	}
 	lumiDetail := "Extract Luminescent Platinum into mods\\contents\\" + BDSPTitleID + "\\Luminescent Platinum (with exefs and romfs inside)"
@@ -174,10 +181,20 @@ func gameView(c config.Client) GameView {
 	}
 	add("lumi", "Luminescent Platinum mod", lumi != "", lumiDetail)
 	add("mega", "Mega Evolution mod (subsdk2)", mega, map[bool]string{true: "Found", false: "Copy MegaExtension's exefs\\subsdk2 into a mod's exefs folder"}[mega])
+	add("coop", "Co-op client (subsdk3)", coopMod, map[bool]string{true: "Found: the game will connect to your room", false: "Copy CoopClient's exefs\\subsdk3 into the Luminescent Platinum exefs folder"}[coopMod])
+
+	v.CoopAge = -1
+	statusPath := filepath.Join(data, "sdcard", "config", "pokemon-coop-status.txt")
+	if st, err := os.Stat(statusPath); err == nil {
+		if b, err := os.ReadFile(statusPath); err == nil && len(b) < 8192 {
+			v.CoopStatus = strings.TrimSpace(string(b))
+			v.CoopAge = int(time.Since(st.ModTime()).Seconds())
+		}
+	}
 
 	v.Ready = true
 	for _, ch := range v.Checks {
-		if !ch.OK && ch.ID != "mega" { // Mega is optional for playing
+		if !ch.OK && ch.ID != "mega" && ch.ID != "coop" { // optional for playing
 			v.Ready = false
 		}
 	}

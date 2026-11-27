@@ -522,7 +522,7 @@ func (a *App) Handler() http.Handler {
 		gv := gameView(c)
 		if !gv.Ready {
 			for _, ch := range gv.Checks {
-				if !ch.OK && ch.ID != "mega" {
+				if !ch.OK && ch.ID != "mega" && ch.ID != "coop" {
 					return nil, fmt.Errorf("Not ready yet: %s. %s", ch.Label, ch.Detail)
 				}
 			}

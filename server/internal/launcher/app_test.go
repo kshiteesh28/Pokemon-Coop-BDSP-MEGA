@@ -262,6 +262,15 @@ func TestGameChecklist(t *testing.T) {
 	if v := gameView(c); !checkOK(v, "mega") {
 		t.Fatalf("mega not detected: %+v", v.Checks)
 	}
+	if v := gameView(c); checkOK(v, "coop") || !v.Ready || v.CoopAge != -1 {
+		t.Fatalf("co-op client is optional and absent: %+v", v)
+	}
+	mk(filepath.Join(mods, "Luminescent Platinum", "exefs", "subsdk3"))
+	os.MkdirAll(filepath.Join(data, "sdcard", "config"), 0o755)
+	os.WriteFile(filepath.Join(data, "sdcard", "config", "pokemon-coop-status.txt"), []byte("state: connected\nmap: 421\n"), 0o644)
+	if v := gameView(c); !checkOK(v, "coop") || !strings.HasPrefix(v.CoopStatus, "state: connected") || v.CoopAge < 0 || v.CoopAge > 5 {
+		t.Fatalf("co-op client/status not detected: %+v", v)
+	}
 
 	// The game's co-op settings land on the virtual SD card.
 	p, err := writeGameCoopConfig(data, config.Client{Address: "1.2.3.4:4100", Room: "AAROH", Name: "Aaroh", Ryujinx: ryu})
