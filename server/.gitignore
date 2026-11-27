@@ -5,3 +5,7 @@
 /coop-sim
 /coop-sim-*
 /coop-server-*
+
+# personal settings (may hold a password)
+/coop.ini
+/invite-coop.ini
