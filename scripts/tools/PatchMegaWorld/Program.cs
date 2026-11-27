@@ -53,7 +53,6 @@ internal static class Program
         new("Heracronite",    "Mega Heracross",   680, 2557, "Early Game", "Eterna Forest",                 "PlaceData_D03R0101", 200, 2),
         new("Victreebelite",  "Mega Victreebel",  838, 2558, "Early Game", "Eterna Forest",                 "PlaceData_D03R0101", 200, 3),
         new("Absolite Z",     "Mega Absol Z",     622, 2559, "Early Game", "Old Chateau (Dining Hall)",     "PlaceData_D25R0102", 307, 0),
-        new("Gengarite",      "Mega Gengar",      656, 2560, "Early Game", "Old Chateau (2F Corridor)",     "PlaceData_D25R0103", 308, 0),
         new("Chandelurite",   "Mega Chandelure", 1059, 2570, "Early Game", "Old Chateau (2F TV Room)",      "PlaceData_D25R0108", 313, 0),
         new("Metagrossite",   "Mega Metagross",   758, 2589, "Early Game", "Wayward Cave (1F)",             "PlaceData_D21R0101", 292, 0),
         new("Mawilite",       "Mega Mawile",      681, 2593, "Early Game", "Wayward Cave (1F)",             "PlaceData_D21R0101", 292, 1),
@@ -200,17 +199,16 @@ internal static class Program
 
     private static void ValidateSpecs()
     {
-        if (Balls.Length + Npcs.Length != 63)
-            throw new InvalidOperationException($"Expected 63 Mega Stones, got {Balls.Length + Npcs.Length}");
-        var itemIds = Balls.Select(b => b.ItemId).Concat(Npcs.Select(n => n.ItemId)).ToList();
-        var flagIds = Balls.Select(b => b.FlagId).Concat(Npcs.Select(n => n.FlagId)).ToList();
+        // 40 Poké Balls + 22 House/Street NPCs + 1 Fantina Gym reward (Gengarite 656) = 63 unique Mega Stones (+ Mega Ring 696)
+        if (Balls.Length + Npcs.Length != 62)
+            throw new InvalidOperationException($"Expected 62 non-Fantina Mega Stones, got {Balls.Length + Npcs.Length}");
+        var itemIds = Balls.Select(b => b.ItemId).Concat(Npcs.Select(n => n.ItemId)).Append(656).ToList();
+        var flagIds = Balls.Select(b => b.FlagId).Concat(Npcs.Select(n => n.FlagId)).Append(3115).ToList();
         if (itemIds.Distinct().Count() != 63)
             throw new InvalidOperationException("Duplicate ItemId detected in Mega Stone placement specs!");
         if (flagIds.Distinct().Count() != 63)
             throw new InvalidOperationException("Duplicate FlagId detected in Mega Stone placement specs!");
-        if (itemIds.Contains(696) || itemIds.Contains(744) || itemIds.Contains(773))
-            throw new InvalidOperationException("Mega Ring / Key Stone must NOT be included!");
-        Console.WriteLine($"Validated all 63 unique Mega Stones ({Balls.Length} Poké Balls + {Npcs.Length} NPCs, 0 Mega Ring).");
+        Console.WriteLine($"Validated all 63 unique Mega Stones ({Balls.Length} Poké Balls + {Npcs.Length} NPCs + Fantina Gengarite & Mega Ring).");
     }
 
     private static Dictionary<string, (float x, float y, int h)> PatchMasterdatas()
@@ -227,11 +225,17 @@ internal static class Program
         {
             var bf = am.GetBaseField(inst, info);
             string assetName = bf["m_Name"].AsString;
-            if (!ballsByAsset.TryGetValue(assetName, out var specs)) continue;
-
+            if (!assetName.StartsWith("PlaceData")) continue;
             var arr = bf["Data.Array"];
-            // Remove any prior mega ball entries for idempotency
-            arr.Children.RemoveAll(e => e["ID"].AsString.StartsWith("FLD_ITEM_MEGA_"));
+            if (arr.IsDummy) continue;
+
+            // Clean any prior mega ball entries from ALL PlaceData assets (removes moved stones like Old Chateau Gengarite)
+            int removed = arr.Children.RemoveAll(e => e["ID"].AsString.StartsWith("FLD_ITEM_MEGA_"));
+            if (!ballsByAsset.TryGetValue(assetName, out var specs))
+            {
+                if (removed > 0) info.SetNewData(bf);
+                continue;
+            }
 
             // Track occupied grid tiles per zone in this PlaceData asset
             var occupied = new HashSet<(int z, int x, int y)>();
@@ -346,7 +350,7 @@ internal static class Program
             foreach (var npc in Npcs)
                 AppendMsg($"00_msg_mega_gift_{Slug(npc.StoneName)}", npc.Dialogue);
             AppendMsg("00_msg_mega_gift_fantina_ring",
-                "Magnifique! You even triumphed over Mega Evolution! Take this Mega Ring—with a Mega Stone, your Pokémon can unleash Mega Evolution in battle, too!");
+                "Magnifique! You even triumphed over my Mega Gengar! Take this Mega Ring and Gengarite—with them, your Pokémon can unleash Mega Evolution in battle, too!");
 
             info.SetNewData(bf);
             patched = true;
@@ -463,14 +467,18 @@ internal static class Program
                 var igCmds = itemGetSc["Commands.Array"];
                 int closeIdx = igCmds.Children.FindIndex(c => c["Arg.Array"].Children.Count > 0 && c["Arg.Array"].Children[0]["data"].AsInt == 81);
                 if (closeIdx < 0) throw new InvalidOperationException("Could not locate _TALK_CLOSE in ev_c05gym0113_leader_item_get");
-                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 22), (5, idxKeyWaitItem)));
+                // Insert in reverse order so execution runs: Dialogue -> Keywait -> Mega Ring (696) -> Gengarite (656) -> Flag 3115
                 igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 41), (3, 3115)));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 22), (5, idxKeyWaitItem)));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 238), (1, FloatBits(656f))));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 22), (5, idxKeyWaitItem)));
                 igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
                 igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 238), (1, FloatBits(696f))));
                 igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 78)));
                 igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 70), (5, idxRingMsg)));
 
-                // 2) Safety-net jump in ev_c05gym0113_leader_badge_get so saves that already beat Fantina can talk to her to claim the Mega Ring
+                // 2) Safety-net jump in ev_c05gym0113_leader_badge_get so saves that already beat Fantina can talk to her to claim Mega Ring + Gengarite
                 var badgeGetSc = scripts.Children.First(s => s["Label"].AsString == "ev_c05gym0113_leader_badge_get");
                 var bgCmds = badgeGetSc["Commands.Array"];
                 bgCmds.Children.Insert(2, MakeCmd(bgCmds, (0, 46), (3, 3115), (5, idxRingSub)));
@@ -484,8 +492,11 @@ internal static class Program
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 78)));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 238), (1, FloatBits(696f))));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
-                rCmds.Children.Add(MakeCmd(rCmds, (0, 41), (3, 3115)));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 22), (5, idxKeyWaitItem)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 238), (1, FloatBits(656f))));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 22), (5, idxKeyWaitItem)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 41), (3, 3115)));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 81)));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 153)));
                 rCmds.Children.Add(MakeCmd(rCmds, (0, 3)));
@@ -561,9 +572,9 @@ internal static class Program
         {
             "# Mega Stone Locations Guide (All 63 Mega Stones)",
             "",
-            "All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).",
+            "All **63 playable Mega Stones** are placed across Sinnoh as **40 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road), **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue), and **Gengarite (`656`) + Mega Ring (`696`)** awarded by **Gym Leader Fantina** in Hearthome City Gym. Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).",
             "",
-            "- **Mega Ring (`696`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards it immediately).",
+            "- **Mega Ring (`696`) + Gengarite (`656`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards both immediately).",
             "- Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3115`).",
             "- All top powerhouse and Z-form stones (**Charizardite X/Y, Tyranitarite, Metagrossite, Garchompite & Z, Absolite Z, Dragoninite, Salamencite, Lucarionite**) are obtainable in the first half of the game (Badges 1–4).",
             "- Five niche/lower-tier stones (**Beedrillite, Pidgeotite, Banettite, Cameruptite, Glalitite**) are placed in Victory Road.",
@@ -596,7 +607,10 @@ internal static class Program
                 (n.StoneName, n.MegaName, n.ItemId, n.LocationName, Source: "NPC Gift",
                  Details: $"`{n.EvScriptAsset}` / `{n.NpcLabel}`", n.FlagId));
 
-            foreach (var row in stageBalls.Concat(stageNpcs).OrderBy(r => r.LocationName).ThenBy(r => r.StoneName))
+            var extra = stage == "Mid Game"
+                ? new[] { (StoneName: "Gengarite", MegaName: "Mega Gengar", ItemId: 656, LocationName: "Hearthome City Gym (Fantina)", Source: "Gym Reward", Details: "`c05gym0113` / defeated Fantina (+ Mega Ring)", FlagId: 3115) }
+                : Array.Empty<(string StoneName, string MegaName, int ItemId, string LocationName, string Source, string Details, int FlagId)>();
+            foreach (var row in stageBalls.Concat(stageNpcs).Concat(extra).OrderBy(r => r.LocationName).ThenBy(r => r.StoneName))
                 lines.Add($"| **{row.StoneName}** | {row.MegaName} | `{row.ItemId}` | {row.LocationName} | {row.Source} | {row.Details} | `{row.FlagId}` |");
 
             lines.Add("");

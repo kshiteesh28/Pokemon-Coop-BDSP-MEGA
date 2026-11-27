@@ -1,8 +1,8 @@
 # Mega Stone Locations Guide (All 63 Mega Stones)
 
-All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).
+All **63 playable Mega Stones** are placed across Sinnoh as **40 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road), **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue), and **Gengarite (`656`) + Mega Ring (`696`)** awarded by **Gym Leader Fantina** in Hearthome City Gym. Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).
 
-- **Mega Ring (`696`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards it immediately).
+- **Mega Ring (`696`) + Gengarite (`656`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards both immediately).
 - Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3115`).
 - All top powerhouse and Z-form stones (**Charizardite X/Y, Tyranitarite, Metagrossite, Garchompite & Z, Absolite Z, Dragoninite, Salamencite, Lucarionite**) are obtainable in the first half of the game (Badges 1–4).
 - Five niche/lower-tier stones (**Beedrillite, Pidgeotite, Banettite, Cameruptite, Glalitite**) are placed in Victory Road.
@@ -19,7 +19,6 @@ All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké B
 | **Victreebelite** | Mega Victreebel | `838` | Eterna Forest | Poké Ball | `PlaceData_D03R0101` (zone 200) at `(1, 0)`, H=0 | `2558` |
 | **Meganiumite** | Mega Meganium | `848` | Floaroma Town (Flower House) | NPC Gift | `t03r0201` / `ev_t03r0201_item_fanatic` | `3082` |
 | **Staraptite** | Mega Staraptor | `1082` | Jubilife City (Condominiums 2F) | NPC Gift | `c01r0502` / `ev_c01r0502_boy3` | `3080` |
-| **Gengarite** | Mega Gengar | `656` | Old Chateau (2F Corridor) | Poké Ball | `PlaceData_D25R0103` (zone 308) at `(5, 6)`, H=0 | `2560` |
 | **Chandelurite** | Mega Chandelure | `1059` | Old Chateau (2F TV Room) | Poké Ball | `PlaceData_D25R0108` (zone 313) at `(21, 4)`, H=0 | `2570` |
 | **Absolite Z** | Mega Absol Z | `622` | Old Chateau (Dining Hall) | Poké Ball | `PlaceData_D25R0102` (zone 307) at `(6, 3)`, H=0 | `2559` |
 | **Aerodactylite** | Mega Aerodactyl | `672` | Oreburgh City (House) | NPC Gift | `c03r0201` / `ev_c03r0201_oldwoman1` | `3081` |
@@ -40,6 +39,7 @@ All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké B
 | **Gardevoirite** | Mega Gardevoir | `657` | Amity Square (Hearthome) | Poké Ball | `PlaceData_D11R0101` (zone 251) at `(38, 20)`, H=1 | `2701` |
 | **Altarianite** | Mega Altaria | `755` | Celestic Town (House) | NPC Gift | `t05r0101` / `ev_t05r0101_oldman1` | `3095` |
 | **Clefablite** | Mega Clefable | `837` | Hearthome City (House) | NPC Gift | `c05r1001` / `ev_c05r1001_idol` | `3085` |
+| **Gengarite** | Mega Gengar | `656` | Hearthome City Gym (Fantina) | Gym Reward | `c05gym0113` / defeated Fantina (+ Mega Ring) | `3115` |
 | **Gyaradosite** | Mega Gyarados | `676` | Lake Valor | Poké Ball | `PlaceData_D28R0101` (zone 326) at `(54, 46)`, H=99 | `2797` |
 | **Salamencite** | Mega Salamence | `769` | Mt. Coronet (1F Route 211 side) | Poké Ball | `PlaceData_D05R0102` (zone 204) at `(4, 31)`, H=2 | `2745` |
 | **Garchompite Z** | Mega Garchomp Z | `1083` | Mt. Coronet (1F South) | Poké Ball | `PlaceData_D05R0101` (zone 203) at `(14, 9)`, H=2 | `2678` |
