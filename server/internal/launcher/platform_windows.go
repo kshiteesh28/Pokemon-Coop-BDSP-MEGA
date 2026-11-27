@@ -22,7 +22,7 @@ func firewallRuleNames(port int) []string {
 func firewallOK(port int) bool {
 	for _, name := range firewallRuleNames(port) {
 		cmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+name)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		hideWindow(cmd)
 		if cmd.Run() != nil {
 			return false
 		}
@@ -40,7 +40,7 @@ func addFirewallRules(port int) error {
 	inner := base64.StdEncoding.EncodeToString(utf16le(script))
 	outer := fmt.Sprintf("Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand %s'", inner)
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", outer)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideWindow(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("Windows didn't allow it (did you click No?)")
 	}
@@ -82,20 +82,35 @@ func openBrowser(url string) error {
 	return cmd.Start()
 }
 
-func hideWindow(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} }
+// hideWindow stops a console window flashing up for helper commands. It uses
+// CREATE_NO_WINDOW rather than HideWindow: HideWindow also hides the first real
+// window the program opens, which made the file picker invisible.
+func hideWindow(cmd *exec.Cmd) {
+	const createNoWindow = 0x08000000
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+}
 
-// pickFile shows the Windows "Open" dialog and returns the chosen path ("" if cancelled).
+// pickFile shows the Windows "Open" dialog in front of everything and returns
+// the chosen path ("" if cancelled).
 func pickFile(title, filter string) (string, error) {
+	q := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
 	script := "Add-Type -AssemblyName System.Windows.Forms; " +
+		"[System.Windows.Forms.Application]::EnableVisualStyles(); " +
+		// An invisible, always-on-top owner window makes the dialog open in front.
+		"$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; " +
+		"StartPosition = 'CenterScreen'; Width = 1; Height = 1; Opacity = 0; FormBorderStyle = 'None' }; " +
+		"$owner.Show(); $owner.Activate(); " +
 		"$d = New-Object System.Windows.Forms.OpenFileDialog; " +
-		"$d.Title = '" + strings.ReplaceAll(title, "'", "''") + "'; " +
-		"$d.Filter = '" + strings.ReplaceAll(filter, "'", "''") + "'; " +
-		"$f = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}; " +
-		"if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.FileName) }"
-	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
+		"$d.Title = '" + q(title) + "'; $d.Filter = '" + q(filter) + "'; $d.CheckFileExists = $true; " +
+		"$r = $d.ShowDialog($owner); $owner.Close(); " +
+		"if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) }"
+	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script)
 	hideWindow(cmd)
 	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	if err != nil {
+		return "", fmt.Errorf("The file picker didn't open (%v). Use \"Paste path\" instead.", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // runningRyujinx returns the path of a running Ryujinx.exe, if any.
