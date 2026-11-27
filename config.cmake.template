@@ -55,6 +55,24 @@ add_module_variant(
         0100000011D90000
         "Pokemon Brilliant Diamond"
 )
+add_module(
+        3                               # subsdk3: co-op client (connects the game to the co-op server)
+        CoopClient
+        INCLUDE include/nn
+                include/game
+                include
+                src/mod
+                src/common
+                imgui
+        SOURCE src/common/exlaunch/
+               src/coop/
+)
+add_module_variant(
+        CoopClient
+        Diamond
+        0100000011D90000
+        "Pokemon Brilliant Diamond"
+)
 
 # Extra cmake code
 add_compile_definitions(
