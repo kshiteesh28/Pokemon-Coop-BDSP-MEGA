@@ -88,7 +88,7 @@ Each room code has its own registry, saved in the data file so it survives resta
 | Type | Name | Dir | Payload |
 |---|---|---|---|
 | 0x30 | BATTLE_CREATE | C→S | kind u8 (0 gym, 1 Elite Four, 2 Champion, 3 free), target u16 (gym 1–8 / E4 1–4 / 1), max_players u8 |
-| 0x31 | BATTLE_LOBBY | S→C | lobby_id u16, kind u8, target u16, host u16, state u8 (0 open, 1 battling), max u8, count u8, count×(player_id u16, ready u8) |
+| 0x31 | BATTLE_LOBBY | S→C | lobby_id u16, kind u8, target u16, host u16, state u8 (0 open, 1 battling), max u8, count u8, count×(player_id u16, ready u8, completed u8) |
 | 0x32 | BATTLE_INVITE | both | lobby_id u16, player_id u16 (C→S invitee / S→C inviter), kind u8, target u16 |
 | 0x33 / 0x34 | BATTLE_JOIN / LEAVE | C→S | lobby_id u16 |
 | 0x35 | BATTLE_READY | C→S | lobby_id u16, ready u8 |
@@ -105,6 +105,7 @@ Each room code has its own registry, saved in the data file so it survives resta
 - A turn goes out when all members have acted, or after 90 s with empty actions for the missing players.
 - If someone disconnects mid-battle, they're dropped and the rest continue. Their slot becomes AI-controlled on the clients.
 - On a win of a gym, Elite Four member or Champion, **everyone still in the lobby** gets that achievement saved, and a PROGRESS message is sent to them. Badges follow the player across rooms.
+- **Helpers:** a player who already beat that gym/E4 member/Champion can still join to help someone who hasn't. BATTLE_LOBBY marks them `completed = 1` so the client can label them as a helper. On a win, only players who didn't have it yet get a new PROGRESS update.
 
 ## Layout
 
