@@ -305,3 +305,19 @@ func TestParseTailscaleStatus(t *testing.T) {
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestPastePath(t *testing.T) {
+	h := newHarness(t)
+	exe := filepath.Join(h.dir, "Ryujinx.exe")
+	os.WriteFile(exe, []byte("x"), 0o644)
+	if code, out := h.call("/api/game/path", map[string]string{"what": "ryujinx", "path": filepath.Join(h.dir, "nope.exe")}); code != 400 || !strings.Contains(out["error"].(string), "Couldn't find") {
+		t.Fatalf("missing file accepted: %d %v", code, out)
+	}
+	// Quotes from Explorer's "Copy as path" are stripped.
+	if code, out := h.call("/api/game/path", map[string]string{"what": "ryujinx", "path": `"` + exe + `"`}); code != 200 {
+		t.Fatalf("paste: %d %v", code, out)
+	}
+	if got := h.state().Settings.Ryujinx; got != exe {
+		t.Fatalf("ryujinx = %q", got)
+	}
+}

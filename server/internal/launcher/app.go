@@ -456,7 +456,7 @@ func (a *App) Handler() http.Handler {
 	api("/api/game/pick", func(r *http.Request) (any, error) {
 		var req struct{ What string }
 		json.NewDecoder(r.Body).Decode(&req)
-		title, filter := "Choose Ryujinx", "Ryujinx|Ryujinx.exe;Ryujinx.app|Programs|*.exe"
+		title, filter := "Choose Ryujinx.exe", "Ryujinx (Ryujinx.exe)|Ryujinx.exe|Programs (*.exe)|*.exe"
 		if req.What == "game" {
 			title, filter = "Choose your Pokemon Brilliant Diamond game file", "Switch games|*.nsp;*.xci|All files|*.*"
 		}
@@ -468,6 +468,22 @@ func (a *App) Handler() http.Handler {
 			return ok, nil // cancelled
 		}
 		return ok, a.setGamePaths(req.What, path)
+	})
+	api("/api/game/path", func(r *http.Request) (any, error) {
+		var req struct{ What, Path string }
+		json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8192)).Decode(&req)
+		p := strings.Trim(strings.TrimSpace(req.Path), `"'`) // Explorer's "Copy as path" adds quotes
+		if p == "" {
+			return nil, fmt.Errorf("Paste a path first.")
+		}
+		if !isFile(p) && !(runtime.GOOS == "darwin" && strings.HasSuffix(p, ".app") && isDir(p)) {
+			return nil, fmt.Errorf("Couldn't find a file at %s", p)
+		}
+		what := "ryujinx"
+		if req.What == "game" {
+			what = "game"
+		}
+		return ok, a.setGamePaths(what, p)
 	})
 	api("/api/game/detect", func(r *http.Request) (any, error) {
 		a.mu.Lock()
