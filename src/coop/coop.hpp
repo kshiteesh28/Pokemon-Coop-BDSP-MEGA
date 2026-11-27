@@ -3,7 +3,8 @@
 //
 // Stage 1: connect to the co-op server from inside the game and send where the
 // player is (map + position) 20 times a second, and keep a list of the other
-// players in the room. Drawing those players in the world is stage 2.
+// players in the room.
+// Stage 2a: show the other players on your map as marker figures (ghosts.cpp).
 //
 // Threads:
 //   main game thread  -> game.cpp: per-frame hook reads the player (only place
@@ -66,6 +67,11 @@ struct RemotePlayer {
 
 // Copies the current remote player table (for drawing them later).
 int GetRemotePlayers(RemotePlayer* out, int max);
+
+// Shows/moves/removes marker figures for players on your map (ghosts.cpp).
+// Main thread only.
+void UpdateGhosts(int32_t myZone, float deltaTime);
+void ClearGhosts();
 
 // Starts the network threads once (safe to call more than once).
 void StartNetwork();

@@ -59,6 +59,8 @@ void OnUpdateHook(FieldPlayerEntity::Object* self, float deltaTime, const Method
     s.frame = gState.frame + 1;
     gState = s;
     nn::os::UnlockMutex(&gStateMutex);
+
+    UpdateGhosts(s.zone, deltaTime);
 }
 }  // namespace
 
