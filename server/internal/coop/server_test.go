@@ -25,7 +25,11 @@ func startServer(t *testing.T, cfg Config) string {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { New(cfg).Serve(ctx, ln); close(done) }()
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { srv.Serve(ctx, ln); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 	return ln.Addr().String()
 }

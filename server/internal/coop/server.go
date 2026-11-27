@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kshiteesh28/Pokemon-Coop-BDSP-MEGA/server/internal/store"
 	"github.com/kshiteesh28/Pokemon-Coop-BDSP-MEGA/server/protocol"
 )
 
@@ -28,6 +29,12 @@ type Config struct {
 	Timeout           time.Duration // dead-client eviction, default 5s
 	Logger            *log.Logger   // default log.Default()
 	Verbose           bool
+
+	DataPath       string        // JSON file for legendary owners + badges; "" = memory only
+	Legendaries    []uint16      // species tracked by the registry; nil = DefaultLegendaries
+	ReserveTimeout time.Duration // max time a legendary stays reserved during a battle, default 15m
+	ReserveGrace   time.Duration // keep a reservation this long after its holder disconnects, default 60s
+	TurnTimeout    time.Duration // battle turn deadline before missing actions are filled, default 90s
 }
 
 func (c *Config) defaults() {
@@ -49,6 +56,18 @@ func (c *Config) defaults() {
 	if c.Logger == nil {
 		c.Logger = log.Default()
 	}
+	if c.Legendaries == nil {
+		c.Legendaries = DefaultLegendaries
+	}
+	if c.ReserveTimeout <= 0 {
+		c.ReserveTimeout = 15 * time.Minute
+	}
+	if c.ReserveGrace <= 0 {
+		c.ReserveGrace = 60 * time.Second
+	}
+	if c.TurnTimeout <= 0 {
+		c.TurnTimeout = 90 * time.Second
+	}
 }
 
 const (
@@ -67,8 +86,13 @@ type Server struct {
 	conns  atomic.Int32
 
 	// hub-owned state
-	clients map[*client]struct{}
-	rooms   map[string]*room
+	clients      map[*client]struct{}
+	rooms        map[string]*room
+	store        *store.Store
+	legendSet    map[uint16]bool
+	reservations map[legendKey]*reservation
+	lobbies      map[uint16]*lobby
+	nextLobby    uint16
 }
 
 type eventKind int
@@ -116,6 +140,8 @@ type client struct {
 	dropped  int
 
 	room     *room
+	key      string // stable identity: name + trainer/secret ID
+	lobby    *lobby
 	pid      uint16
 	app      protocol.Appearance
 	zone     int32
@@ -130,9 +156,18 @@ type room struct {
 	nextID  uint16
 }
 
-func New(cfg Config) *Server {
+func New(cfg Config) (*Server, error) {
 	cfg.defaults()
-	return &Server{cfg: cfg, events: make(chan event, 1024), clients: map[*client]struct{}{}, rooms: map[string]*room{}}
+	st, err := store.Open(cfg.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{cfg: cfg, events: make(chan event, 1024), clients: map[*client]struct{}{}, rooms: map[string]*room{},
+		store: st, legendSet: map[uint16]bool{}, reservations: map[legendKey]*reservation{}, lobbies: map[uint16]*lobby{}}
+	for _, sp := range cfg.Legendaries {
+		s.legendSet[sp] = true
+	}
+	return s, nil
 }
 
 func (s *Server) logf(format string, args ...any) { s.cfg.Logger.Printf(format, args...) }
@@ -262,6 +297,7 @@ func (s *Server) hub(ctx context.Context) {
 					s.remove(c, protocol.LeaveTimeout, "timed out")
 				}
 			}
+			s.featureTick(now)
 		}
 	}
 }
@@ -287,6 +323,8 @@ func (s *Server) remove(c *client, reason uint8, why string) {
 	c.gone = true
 	delete(s.clients, c)
 	if r := c.room; r != nil {
+		s.lobbyLeave(c)
+		s.reservationGrace(c)
 		s.leaveZone(c)
 		delete(r.players, c.pid)
 		leave := (&protocol.PlayerLeave{PlayerID: c.pid, Reason: reason}).Marshal()
@@ -367,6 +405,9 @@ func (s *Server) handle(c *client, h protocol.Header, p []byte) {
 		case protocol.MsgCoopEvent:
 			s.onCoopEvent(c, p, now)
 		default:
+			if s.handleFeature(c, h.Type, p, now) {
+				return
+			}
 			s.vlogf("[%s] ignoring %s", c.addr, h.Type)
 		}
 	}
@@ -436,12 +477,14 @@ func (s *Server) onHello(c *client, p []byte) {
 		m.Name = "Trainer"
 	}
 	c.room, c.pid, c.app = r, r.nextID, m.Appearance
+	c.key = identityKey(m.Name, m.TrainerID, m.SecretID)
 	r.players[c.pid] = c
 	s.send(c, protocol.MsgHelloAck, (&protocol.HelloAck{PlayerID: c.pid, TickRateHz: uint8(s.cfg.TickHz), Status: protocol.StatusOK, ServerTimeMs: s.nowMs()}).Marshal())
 	s.logf("room %s: %q (#%d) joined from %s, zone %d (%d/%d)", code, m.Name, c.pid, c.addr, m.InitialZone, len(r.players), s.cfg.MaxPlayersPerRoom)
 	c.zone = m.InitialZone
 	c.state.Zone = m.InitialZone
 	s.enterZone(c)
+	s.sendInitialFeatureState(c)
 }
 
 func (s *Server) meta(c *client) []byte {

@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,8 @@ func main() {
 	tick := flag.Int("tick", 20, "snapshot rate in Hz")
 	timeout := flag.Duration("timeout", 5*time.Second, "disconnect clients silent for this long")
 	verbose := flag.Bool("v", false, "verbose logging")
+	dataPath := flag.String("data", envOr("COOP_DATA", "coop-data.json"), "file that stores legendary owners and badges")
+	legendList := flag.String("legendaries", "", "comma-separated National Dex numbers to track (default: built-in BDSP list)")
 	flag.Parse()
 
 	password := os.Getenv("COOP_PASSWORD") // env, not a flag, so it doesn't show in `ps`
@@ -37,10 +41,25 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	srv := coop.New(coop.Config{
+	var legends []uint16
+	if *legendList != "" {
+		for _, f := range strings.Split(*legendList, ",") {
+			n, err := strconv.ParseUint(strings.TrimSpace(f), 10, 16)
+			if err != nil {
+				log.Fatalf("bad -legendaries entry %q", f)
+			}
+			legends = append(legends, uint16(n))
+		}
+	}
+	srv, err := coop.New(coop.Config{
 		MaxPlayersPerRoom: *maxPlayers, MaxRooms: *maxRooms, MaxConns: *maxConns,
 		Password: password, TickHz: *tick, Timeout: *timeout, Verbose: *verbose,
+		DataPath: *dataPath, Legendaries: legends,
 	})
+	if err != nil {
+		log.Fatalf("loading %s: %v", *dataPath, err)
+	}
+	log.Printf("saving legendary owners and badges to %s", *dataPath)
 	if err := srv.Serve(ctx, ln); err != nil {
 		log.Fatal(err)
 	}
