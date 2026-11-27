@@ -1,8 +1,9 @@
 # Mega Stone Locations Guide (All 63 Mega Stones)
 
-All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required). The **Mega Ring** is intentionally not placed here.
+All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).
 
-- Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3114`).
+- **Mega Ring (`696`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards it immediately).
+- Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3115`).
 - All top powerhouse and Z-form stones (**Charizardite X/Y, Tyranitarite, Metagrossite, Garchompite & Z, Absolite Z, Dragoninite, Salamencite, Lucarionite**) are obtainable in the first half of the game (Badges 1–4).
 - Five niche/lower-tier stones (**Beedrillite, Pidgeotite, Banettite, Cameruptite, Glalitite**) are placed in Victory Road.
 

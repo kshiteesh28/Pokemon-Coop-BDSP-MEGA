@@ -329,21 +329,24 @@ internal static class Program
             arr.Children.RemoveAll(e => e["labelName"].AsString.StartsWith("00_msg_mega_gift_"));
 
             var template = arr.Children.Last();
-            foreach (var npc in Npcs)
+            void AppendMsg(string labelName, string dialogue)
             {
-                string labelName = $"00_msg_mega_gift_{Slug(npc.StoneName)}";
                 int idx = arr.Children.Count;
                 var clone = template.Clone();
                 clone["labelIndex"].AsInt = idx;
                 clone["arrayIndex"].AsInt = idx;
                 clone["labelName"].AsString = labelName;
                 var words = clone["wordDataArray.Array"].Children;
-                words[0]["str"].AsString = npc.Dialogue;
-                words[0]["strWidth"].AsFloat = npc.Dialogue.Length * 12.0f;
+                words[0]["str"].AsString = dialogue;
+                words[0]["strWidth"].AsFloat = dialogue.Length * 12.0f;
                 for (int w = 1; w < words.Count; w++)
                     words[w]["str"].AsString = "";
                 arr.Children.Add(clone);
             }
+            foreach (var npc in Npcs)
+                AppendMsg($"00_msg_mega_gift_{Slug(npc.StoneName)}", npc.Dialogue);
+            AppendMsg("00_msg_mega_gift_fantina_ring",
+                "Magnifique! You even triumphed over Mega Evolution! Take this Mega Ring—with a Mega Stone, your Pokémon can unleash Mega Evolution in battle, too!");
 
             info.SetNewData(bf);
             patched = true;
@@ -365,6 +368,7 @@ internal static class Program
         var inst = am.LoadAssetsFileFromBundle(bun, 0, false);
 
         bool patchedFldItem = false;
+        bool patchedFantina = false;
         var npcsByAsset = Npcs.GroupBy(n => n.EvScriptAsset).ToDictionary(g => g.Key, g => g.ToList());
         int patchedNpcs = 0;
 
@@ -445,10 +449,55 @@ internal static class Program
                 }
                 info.SetNewData(bf);
             }
+            else if (name == "c05gym0113")
+            {
+                // Award Mega Ring (696) right after defeating Fantina (flag 3115) + fallback if talking to her on an already-won save!
+                var strList = bf["StrList.Array"];
+                var scripts = bf["Scripts.Array"];
+                int idxRingMsg = EnsureString(strList, "dp_scenario3%00_msg_mega_gift_fantina_ring");
+                int idxKeyWaitItem = EnsureString(strList, "ev_item_event_keywait");
+                int idxRingSub = EnsureString(strList, "ev_c05gym0113_mega_ring_get");
+
+                // 1) Inject Mega Ring gift right after TM65 Shadow Claw & leader_05 in ev_c05gym0113_leader_item_get
+                var itemGetSc = scripts.Children.First(s => s["Label"].AsString == "ev_c05gym0113_leader_item_get");
+                var igCmds = itemGetSc["Commands.Array"];
+                int closeIdx = igCmds.Children.FindIndex(c => c["Arg.Array"].Children.Count > 0 && c["Arg.Array"].Children[0]["data"].AsInt == 81);
+                if (closeIdx < 0) throw new InvalidOperationException("Could not locate _TALK_CLOSE in ev_c05gym0113_leader_item_get");
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 22), (5, idxKeyWaitItem)));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 41), (3, 3115)));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 60), (2, 238), (1, FloatBits(696f))));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 78)));
+                igCmds.Children.Insert(closeIdx, MakeCmd(igCmds, (0, 70), (5, idxRingMsg)));
+
+                // 2) Safety-net jump in ev_c05gym0113_leader_badge_get so saves that already beat Fantina can talk to her to claim the Mega Ring
+                var badgeGetSc = scripts.Children.First(s => s["Label"].AsString == "ev_c05gym0113_leader_badge_get");
+                var bgCmds = badgeGetSc["Commands.Array"];
+                bgCmds.Children.Insert(2, MakeCmd(bgCmds, (0, 46), (3, 3115), (5, idxRingSub)));
+
+                scripts.Children.RemoveAll(s => s["Label"].AsString == "ev_c05gym0113_mega_ring_get");
+                var ringSc = ValueBuilder.DefaultValueFieldFromArrayTemplate(scripts);
+                ringSc["Label"].AsString = "ev_c05gym0113_mega_ring_get";
+                var rCmds = ringSc["Commands.Array"];
+                rCmds.Children.Clear();
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 70), (5, idxRingMsg)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 78)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 238), (1, FloatBits(696f))));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 60), (2, 239), (1, FloatBits(1f))));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 41), (3, 3115)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 22), (5, idxKeyWaitItem)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 81)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 153)));
+                rCmds.Children.Add(MakeCmd(rCmds, (0, 3)));
+                scripts.Children.Add(ringSc);
+
+                info.SetNewData(bf);
+                patchedFantina = true;
+            }
         }
 
-        if (!patchedFldItem || patchedNpcs != Npcs.Length)
-            throw new InvalidOperationException($"ev_script patch incomplete: fld_item={patchedFldItem}, npcs={patchedNpcs}/{Npcs.Length}");
+        if (!patchedFldItem || patchedNpcs != Npcs.Length || !patchedFantina)
+            throw new InvalidOperationException($"ev_script patch incomplete: fld_item={patchedFldItem}, npcs={patchedNpcs}/{Npcs.Length}, fantina={patchedFantina}");
 
         SaveBundleLz4(am, bun, inst.file, dstEv);
         Console.WriteLine($"Patched {Balls.Length} fld_item scripts + {patchedNpcs} NPC scripts into Dpr/ev_script ({new FileInfo(dstEv).Length:N0}B).");
@@ -500,10 +549,10 @@ internal static class Program
         }
         am.UnloadAll(true);
 
-        if (foundBalls != Balls.Length || foundFld != Balls.Length || foundNpcs != Npcs.Length || foundMsgs != Npcs.Length)
-            throw new InvalidOperationException($"Round-trip verify FAILED: balls={foundBalls}/{Balls.Length}, fld={foundFld}/{Balls.Length}, npcs={foundNpcs}/{Npcs.Length}, msgs={foundMsgs}/{Npcs.Length}");
+        if (foundBalls != Balls.Length || foundFld != Balls.Length || foundNpcs != Npcs.Length || foundMsgs != Npcs.Length + 1)
+            throw new InvalidOperationException($"Round-trip verify FAILED: balls={foundBalls}/{Balls.Length}, fld={foundFld}/{Balls.Length}, npcs={foundNpcs}/{Npcs.Length}, msgs={foundMsgs}/{Npcs.Length + 1}");
 
-        Console.WriteLine($"[PASS] Round-trip verified: {foundBalls}/{Balls.Length} Poké Balls, {foundFld}/{Balls.Length} fld_item scripts, {foundNpcs}/{Npcs.Length} NPC gifts, {foundMsgs}/{Npcs.Length} custom dialogues!");
+        Console.WriteLine($"[PASS] Round-trip verified: {foundBalls}/{Balls.Length} Poké Balls, {foundFld}/{Balls.Length} fld_item scripts, {foundNpcs}/{Npcs.Length} NPC gifts + Fantina Mega Ring, {foundMsgs}/{Npcs.Length + 1} custom dialogues!");
     }
 
     private static void WriteLocationsMarkdown(Dictionary<string, (float x, float y, int h)> coords)
@@ -512,9 +561,10 @@ internal static class Program
         {
             "# Mega Stone Locations Guide (All 63 Mega Stones)",
             "",
-            "All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required). The **Mega Ring** is intentionally not placed here.",
+            "All **63 playable Mega Stones** are placed across Sinnoh as **41 visible Poké Balls** (in caves, forests, routes, lakes, and Victory Road) and **22 House/Street NPC gifts** (with custom Mega Pokémon dialogue). Mega Rayquaza Mega Evolves by knowing **Dragon Ascent** (no Mega Stone required).",
             "",
-            "- Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3114`).",
+            "- **Mega Ring (`696`):** Awarded automatically by **Gym Leader Fantina** in **Hearthome City Gym** (`c05gym0113`, flag `3115`) right after defeating her (and if you already beat Fantina on an existing save, talking to her again in Hearthome Gym awards it immediately).",
+            "- Every pickup is tracked in your save file (`SaveData.bin`) via its dedicated unused `FlagWork` ID (`2532`–`3115`).",
             "- All top powerhouse and Z-form stones (**Charizardite X/Y, Tyranitarite, Metagrossite, Garchompite & Z, Absolite Z, Dragoninite, Salamencite, Lucarionite**) are obtainable in the first half of the game (Badges 1–4).",
             "- Five niche/lower-tier stones (**Beedrillite, Pidgeotite, Banettite, Cameruptite, Glalitite**) are placed in Victory Road.",
             ""
