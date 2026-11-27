@@ -1,0 +1,6 @@
+# Pokemon co-op settings. Copy this file to coop.ini and fill it in,
+# or just run join.bat / host-server.bat and they will ask you.
+address  = 100.67.109.85:4100
+room     = AAROH
+name     = YourName
+password =
