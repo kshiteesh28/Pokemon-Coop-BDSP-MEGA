@@ -69,7 +69,7 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(127, 1, "Mega Pinsir",      "kanto",  51, 671,  False, 1.04),
     MegaFormSpec(130, 1, "Mega Gyarados",    "kanto",  51, 676,  True,  1.05),
     MegaFormSpec(142, 1, "Mega Aerodactyl",  "kanto",  51, 672,  False, 1.12),
-    MegaFormSpec(149, 1, "Mega Dragonite",   "kanto",  51, 840,  True,  1.28),
+    MegaFormSpec(149, 1, "Mega Dragonite",   "kanto",  51, 840,  True,  0.85),
     MegaFormSpec(150, 1, "Mega Mewtwo X",    "kanto",  51, 662,  True,  1.05),
     MegaFormSpec(150, 2, "Mega Mewtwo Y",    "kanto",  52, 663,  True,  0.96),
     # --- Johto (9) ---

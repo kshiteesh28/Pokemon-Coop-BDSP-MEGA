@@ -364,15 +364,23 @@ def composite_material_srgb(
 
     if lym_name in bntx_idx:
         lym = resize_rgba(decode_bntx_rgba(bntx_idx[lym_name], tmp_dir), out_h, out_w)
-        r, g, b, a = lym[:, :, 0:1], lym[:, :, 1:2], lym[:, :, 2:3], lym[:, :, 3:4]
-        w_sum = r + g + b + a
-        w0 = np.clip(1.0 - w_sum, 0.0, 1.0)
+        r = np.clip(lym[:, :, 0:1], 0.0, 1.0)
+        g = np.clip(lym[:, :, 1:2], 0.0, 1.0)
+        b = np.clip(lym[:, :, 2:3], 0.0, 1.0)
+        a = np.clip(lym[:, :, 3:4], 0.0, 1.0)
         c0 = np.array(cols.get("BaseColor", (1.0, 1.0, 1.0)), dtype=np.float32)
         c1 = np.array(cols.get("BaseColorLayer1", (1.0, 1.0, 1.0)), dtype=np.float32)
         c2 = np.array(cols.get("BaseColorLayer2", (0.0, 0.0, 0.0)), dtype=np.float32)
         c3 = np.array(cols.get("BaseColorLayer3", (0.0, 0.0, 0.0)), dtype=np.float32)
         c4 = np.array(cols.get("BaseColorLayer4", (0.0, 0.0, 0.0)), dtype=np.float32)
-        layer_lin = (w0 * c0 + r * c1 + g * c2 + b * c3 + a * c4) / np.maximum(w0 + w_sum, 1.0)
+        # Exact Trinity sequential over-blend (lerp stack): Base -> Layer1(R) -> Layer2(G) -> Layer3(B) -> Layer4(A).
+        # Fixes overlapping masks (e.g. Mega Blaziken R=1 red base + G=1 black legs) where weighted averaging muddied black into red-brown!
+        layer_lin = np.broadcast_to(c0, (out_h, out_w, 3)).astype(np.float32).copy()
+        layer_lin = layer_lin * (1.0 - r) + c1 * r
+        layer_lin = layer_lin * (1.0 - g) + c2 * g
+        layer_lin = layer_lin * (1.0 - b) + c3 * b
+        if float(a.min()) < 0.99:
+            layer_lin = layer_lin * (1.0 - a) + c4 * a
         rgb_lin = alb_lin * layer_lin
     else:
         c1 = np.array(cols.get("BaseColorLayer1", cols.get("BaseColor", (1.0, 1.0, 1.0))), dtype=np.float32)
