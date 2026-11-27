@@ -4,6 +4,33 @@ The N-player shared-world relay described in §6 of the architecture guide. It's
 
 > **Status:** the server and a mock-player simulator are done and tested. The in-game client (the subsdk2/subsdk3 network thread, Phases 2–3) is **not** in this folder. Until that exists, the server has no game to talk to, so `coop-sim` stands in for players.
 
+## The Pokémon Co-op app (recommended)
+
+Double-click **`launcher.bat`** (Windows) or **`launcher-mac.command`** (Mac). It builds the app if Go is installed and opens **Pokémon Co-op** in its own window. Or download the ready-made app from the repo's **Actions** tab → latest "Co-op server" run → **Artifacts**.
+
+Everything is in one window, in two steps:
+
+1. **Connect**
+   - Shows whether Tailscale is installed and connected, with **Install / Connect / Share PC** buttons.
+   - Your trainer name, room code, password and server address, saved in `coop.ini`.
+   - **Host** starts the server on this PC. It shows the addresses friends need, has a **Copy invite** button, and offers a one-click firewall fix on Windows.
+   - **Join** connects to a room. The players list, ping and **room chat** update live.
+2. **Play**
+   - A checklist: Ryujinx, keys, firmware, the Brilliant Diamond file, the Luminescent Platinum mod and the Mega mod. Each item has **Browse** / **Find automatically** buttons.
+   - Shows legendaries and badges.
+   - **▶ PLAY** writes your co-op settings to Ryujinx's SD card (`sdmc:/config/pokemon-coop.ini`) and starts the game with your mods.
+
+Closing the window quits the app and stops hosting. The window is the app's own page shown by Edge/Chrome in *app mode* (no tabs or address bar). The app only listens on `127.0.0.1` and every request needs a random per-launch token, so websites can't control it.
+
+## Room chat (0x40)
+
+| Dir | Payload |
+|---|---|
+| C→S | text (UTF-8, up to 200 bytes) |
+| S→C | sender_id u16, name[24], text. Sent to everyone in the room, **including the sender**, so all players see the same order |
+
+There's no per-message cooldown. The general flood guard (60 packets/s) still applies. Control characters are stripped.
+
 ## Easy mode: double-click scripts
 
 **Host (Windows):** double-click **`host-server.bat`**.
