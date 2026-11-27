@@ -1,0 +1,40 @@
+name: Co-op server
+
+on:
+  push:
+    paths: ['server/**', '.github/workflows/server.yml']
+  pull_request:
+    paths: ['server/**', '.github/workflows/server.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Vet and test
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
+      - name: Simulate 16 players
+        run: |
+          go build -o coop-server ./cmd/coop-server
+          ./coop-server -listen 127.0.0.1:4100 &
+          sleep 1
+          go run ./cmd/coop-sim -players 16 -per-room 4 -duration 10s
+      - name: Build Linux binaries
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/coop-server-linux-amd64 ./cmd/coop-server
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/coop-server-linux-arm64 ./cmd/coop-server
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/coop-server-windows-amd64.exe ./cmd/coop-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coop-server
+          path: server/dist/
