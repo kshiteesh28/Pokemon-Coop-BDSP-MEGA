@@ -10,7 +10,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/coop-server -listen :4100 -max-players 4
+ExecStart=/usr/local/bin/coop-server -listen :4100 -max-players 4 -data /var/lib/coop-server/coop-data.json
+StateDirectory=coop-server
 Restart=always
 RestartSec=2
 DynamicUser=yes
