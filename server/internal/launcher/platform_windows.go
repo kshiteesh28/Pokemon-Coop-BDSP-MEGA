@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"unicode/utf16"
 )
@@ -80,3 +81,28 @@ func openBrowser(url string) error {
 	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	return cmd.Start()
 }
+
+func hideWindow(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} }
+
+// pickFile shows the Windows "Open" dialog and returns the chosen path ("" if cancelled).
+func pickFile(title, filter string) (string, error) {
+	script := "Add-Type -AssemblyName System.Windows.Forms; " +
+		"$d = New-Object System.Windows.Forms.OpenFileDialog; " +
+		"$d.Title = '" + strings.ReplaceAll(title, "'", "''") + "'; " +
+		"$d.Filter = '" + strings.ReplaceAll(filter, "'", "''") + "'; " +
+		"$f = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}; " +
+		"if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.FileName) }"
+	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-Command", script)
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// runningRyujinx returns the path of a running Ryujinx.exe, if any.
+func runningRyujinx() string {
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", "(Get-Process Ryujinx -ErrorAction SilentlyContinue | Select-Object -First 1).Path")
+	hideWindow(cmd)
+	out, _ := cmd.Output()
+	return strings.TrimSpace(string(out))
+}
+
