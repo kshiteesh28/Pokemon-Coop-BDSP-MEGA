@@ -96,6 +96,9 @@ func (s *Store) Legend(room string, species uint16) (Legend, bool) {
 
 func (s *Store) Legends(room string) map[uint16]Legend { return s.d.Legends[room] }
 
+// AllLegends returns every room's legendaries (room code -> species -> owner).
+func (s *Store) AllLegends() map[string]map[uint16]Legend { return s.d.Legends }
+
 func (s *Store) SetLegend(room string, species uint16, l Legend) error {
 	if s.d.Legends[room] == nil {
 		s.d.Legends[room] = map[uint16]Legend{}
