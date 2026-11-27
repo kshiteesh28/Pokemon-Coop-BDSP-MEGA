@@ -30,6 +30,7 @@ func main() {
 	perRoom := flag.Int("per-room", 4, "players per room")
 	duration := flag.Duration("duration", 20*time.Second, "how long to run")
 	password := flag.String("password", os.Getenv("COOP_PASSWORD"), "server password")
+	nameFlag := flag.String("name", "Bot", "trainer name prefix shown on the server (e.g. your own name)")
 	roomFlag := flag.String("room", "", "join this room code (default: SIM-1, SIM-2, ... filled -per-room at a time)")
 	flag.Parse()
 
@@ -44,7 +45,7 @@ func main() {
 	var wg sync.WaitGroup
 	for i := 0; i < *players; i++ {
 		wg.Add(1)
-		results[i] = &stats{name: fmt.Sprintf("Bot%02d", i+1)}
+		results[i] = &stats{name: fmt.Sprintf("%s%02d", *nameFlag, i+1)}
 		go func(i int) {
 			defer wg.Done()
 			run(*addr, roomFor(i), i, *password, *duration, start, results[i])
