@@ -450,11 +450,20 @@ internal static partial class Program
             texPids[stem] = pid;
         }
 
-        // Inject 4x4 pure-white Linear RGBA32 neutral _AmbientTex so BDSP shader never falls back to 0.5 greyTexture
+        // Inject 4x4 Vanilla-Matched Linear RGBA32 _AmbientTex: RGBA(0, 0, 115, 255).
+        // Decoded vanilla BDSP *_amb (DXT1) across Garchomp/Sceptile/Metagross/Charizard proves:
+        //   R = 0 (100% of pixels), G = 0 on lit surfaces (inverted occlusion mask; 255 = 100% shadow / kills rim & specular!),
+        //   B = 102..139 (~0.45) for BDSP cel/rim intensity.
         long neutralAmbPid = nextPid++;
         {
             var ambBytes = new byte[4 * 4 * 4];
-            Array.Fill(ambBytes, (byte)0xFF);
+            for (int p = 0; p < ambBytes.Length; p += 4)
+            {
+                ambBytes[p + 0] = 0;   // R = 0.00 (vanilla exact)
+                ambBytes[p + 1] = 0;   // G = 0.00 (0% occlusion -> full key light, specular & rim glow!)
+                ambBytes[p + 2] = 115; // B = 0.45 (vanilla 102..139 range)
+                ambBytes[p + 3] = 255; // A = 1.00
+            }
             var ambBf = am.GetBaseField(texTemplateInst, vanTexTemplateInfo);
             ambBf["m_Name"].AsString = $"{formId}_NeutralAmb";
             ambBf["m_ForcedFallbackFormat"].AsInt = 4;
