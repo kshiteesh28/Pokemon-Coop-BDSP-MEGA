@@ -295,24 +295,35 @@ func (a *Appearance) read(r *reader) {
 	a.FollowShiny = r.u8()
 }
 
-// HelloReq (0x01, client → server). 52 bytes, or 68 with the optional password.
+// HelloReq (0x01, client → server). 52 bytes base; extensions append
+// password[16] (→ 68 bytes) and then trainer_id u32 + secret_id u32 (→ 76 bytes).
+// trainer_id/secret_id are the save file's TID/SID and give the player a stable
+// identity across sessions (used for legendary ownership and badge progress).
 type HelloReq struct {
 	RoomCode string // up to 16 bytes
 	Appearance
 	InitialZone int32
-	Password    string // optional extension: 16 bytes appended after initial_zone_id
+	Password    string // optional extension
+	TrainerID   uint32 // optional extension
+	SecretID    uint32 // optional extension
 }
 
 const HelloReqSize = 52
 const HelloReqWithPasswordSize = 68
+const HelloReqWithIdentitySize = 76
 
 func (m *HelloReq) Marshal() []byte {
 	w := &writer{}
 	w.str(m.RoomCode, 16)
 	m.Appearance.write(w)
 	w.i32(m.InitialZone)
-	if m.Password != "" {
+	hasID := m.TrainerID != 0 || m.SecretID != 0
+	if m.Password != "" || hasID {
 		w.str(m.Password, 16)
+	}
+	if hasID {
+		w.u32(m.TrainerID)
+		w.u32(m.SecretID)
 	}
 	return w.b
 }
@@ -321,9 +332,13 @@ func (m *HelloReq) Unmarshal(b []byte) error {
 	m.RoomCode = r.str(16)
 	m.Appearance.read(r)
 	m.InitialZone = r.i32()
-	m.Password = ""
+	m.Password, m.TrainerID, m.SecretID = "", 0, 0
 	if r.err == nil && len(b) >= HelloReqWithPasswordSize {
 		m.Password = r.str(16)
+	}
+	if r.err == nil && len(b) >= HelloReqWithIdentitySize {
+		m.TrainerID = r.u32()
+		m.SecretID = r.u32()
 	}
 	return r.err
 }

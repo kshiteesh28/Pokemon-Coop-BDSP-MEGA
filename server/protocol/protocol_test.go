@@ -28,7 +28,7 @@ func TestSizesMatchGuide(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
-	h := HelloReq{RoomCode: "SINNOH-01", Appearance: Appearance{Name: "Lucas", FashionID: 3, ColorID: 2, Gender: 1, FollowSpecies: 448, FollowForm: 1, FollowShiny: 1}, InitialZone: 421, Password: "pw"}
+	h := HelloReq{RoomCode: "SINNOH-01", Appearance: Appearance{Name: "Lucas", FashionID: 3, ColorID: 2, Gender: 1, FollowSpecies: 448, FollowForm: 1, FollowShiny: 1}, InitialZone: 421, Password: "pw", TrainerID: 12345, SecretID: 54321}
 	var h2 HelloReq
 	if err := h2.Unmarshal(h.Marshal()); err != nil || !reflect.DeepEqual(h, h2) {
 		t.Fatalf("hello %+v %v", h2, err)
