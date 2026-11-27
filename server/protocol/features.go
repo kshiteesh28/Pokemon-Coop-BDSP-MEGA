@@ -11,7 +11,7 @@ const (
 	MsgLegendTransfer   MsgType = 0x24 // C→S  species u16, to_player_id u16
 
 	MsgBattleCreate MsgType = 0x30 // C→S  kind u8, target u16, max_players u8
-	MsgBattleLobby  MsgType = 0x31 // S→C  lobby state
+	MsgBattleLobby  MsgType = 0x31 // S→C  lobby state (members carry ready + completed flags)
 	MsgBattleInvite MsgType = 0x32 // both lobby_id u16, player_id u16, kind u8, target u16
 	MsgBattleJoin   MsgType = 0x33 // C→S  lobby_id u16
 	MsgBattleLeave  MsgType = 0x34 // C→S  lobby_id u16
@@ -187,8 +187,9 @@ func (m *BattleCreate) Unmarshal(b []byte) error {
 }
 
 type BattleMember struct {
-	PlayerID uint16
-	Ready    uint8
+	PlayerID  uint16
+	Ready     uint8
+	Completed uint8 // 1 = already beat this gym/E4 member/Champion: joining as a helper
 }
 
 type BattleLobby struct {
@@ -213,6 +214,7 @@ func (m *BattleLobby) Marshal() []byte {
 	for _, x := range m.Members {
 		w.u16(x.PlayerID)
 		w.u8(x.Ready)
+		w.u8(x.Completed)
 	}
 	return w.b
 }
@@ -222,7 +224,7 @@ func (m *BattleLobby) Unmarshal(b []byte) error {
 	n := int(r.u8())
 	m.Members = nil
 	for i := 0; i < n && r.err == nil; i++ {
-		m.Members = append(m.Members, BattleMember{r.u16(), r.u8()})
+		m.Members = append(m.Members, BattleMember{r.u16(), r.u8(), r.u8()})
 	}
 	return r.err
 }

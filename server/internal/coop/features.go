@@ -252,11 +252,14 @@ func (s *Server) battleErr(c *client, id uint16, code uint8) {
 func (s *Server) lobbyState(l *lobby) []byte {
 	m := protocol.BattleLobby{LobbyID: l.id, Kind: l.kind, Target: l.target, Host: l.host.pid, State: l.state, MaxPlayers: uint8(l.max)}
 	for _, c := range l.members {
-		r := uint8(0)
+		bm := protocol.BattleMember{PlayerID: c.pid}
 		if l.ready[c] {
-			r = 1
+			bm.Ready = 1
 		}
-		m.Members = append(m.Members, protocol.BattleMember{PlayerID: c.pid, Ready: r})
+		if l.kind <= protocol.BattleChampion && s.store.HasAchievement(c.key, store.Achievement{Kind: l.kind, Target: l.target}) {
+			bm.Completed = 1
+		}
+		m.Members = append(m.Members, bm)
 	}
 	return m.Marshal()
 }
