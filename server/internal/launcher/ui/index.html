@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pokémon Co-op</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #121923; --card: #161f2c; --card2: #1b2636; --line: #243247;
+    --text: #e8eef7; --muted: #8a9ab0; --dim: #5d6c82;
+    --red: #ef4b4b; --red2: #c93636; --gold: #f5c451; --green: #3ccf8e; --blue: #5aa9ff; --amber: #ffb547;
+    --radius: 14px;
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-size: 14px; }
+  body { background: radial-gradient(1200px 600px at 10% -10%, #1d2a44 0%, transparent 60%), radial-gradient(900px 500px at 110% 10%, #3a1d27 0%, transparent 55%), var(--bg); background-attachment: fixed; }
+  button, input { font: inherit; color: inherit; }
+  ::selection { background: #ef4b4b55; }
+
+  /* header */
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-bottom: 1px solid var(--line); background: #0d1117cc; backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 5; }
+  .logo { width: 38px; height: 38px; position: relative; flex: none; }
+  .logo i { position: absolute; width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--red); top: 6px; left: 0; }
+  .logo i + i { border-color: var(--gold); left: 12px; mix-blend-mode: screen; }
+  .brand b { font-size: 18px; letter-spacing: .2px; display: block; }
+  .brand span { color: var(--muted); font-size: 12px; }
+  .pills { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 0 3px #3ccf8e2e; }
+  .dot.warn { background: var(--amber); box-shadow: 0 0 0 3px #ffb5472e; }
+  .dot.bad { background: var(--red); box-shadow: 0 0 0 3px #ef4b4b2e; }
+  .iconbtn { background: transparent; border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; color: var(--muted); cursor: pointer; }
+  .iconbtn:hover { color: var(--text); border-color: #36506f; }
+
+  /* layout */
+  main { display: grid; grid-template-columns: minmax(330px, 1.05fr) minmax(340px, 1.2fr) minmax(320px, 1fr); gap: 18px; padding: 18px 22px 90px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr 1fr; } .col3 { grid-column: 1 / -1; } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .card { background: linear-gradient(180deg, var(--card2), var(--card)); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: 0 10px 30px #0006; }
+  .card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+  .card h2 .step { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--red); color: #fff; font-size: 12px; letter-spacing: 0; }
+  .card h2 .step.gold { background: var(--gold); color: #1b1300; }
+  .card h2 .right { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--dim); }
+  .sub { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row.wrap { flex-wrap: wrap; }
+  .sep { height: 1px; background: var(--line); margin: 14px 0; }
+
+  /* form */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  label { display: block; font-size: 11.5px; color: var(--muted); margin: 0 0 5px 2px; }
+  input[type=text], input[type=password] { width: 100%; background: #0f1722; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; outline: none; transition: border-color .15s; }
+  input:focus { border-color: var(--blue); }
+  input::placeholder { color: var(--dim); }
+  .full { grid-column: 1 / -1; }
+
+  /* buttons */
+  .btn { border: 0; border-radius: 10px; padding: 9px 14px; cursor: pointer; font-weight: 600; background: #26344a; color: var(--text); transition: transform .06s, background .15s, opacity .15s; white-space: nowrap; }
+  .btn:hover { background: #2e3f59; }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.red { background: linear-gradient(180deg, var(--red), var(--red2)); color: #fff; }
+  .btn.red:hover { filter: brightness(1.08); }
+  .btn.green { background: linear-gradient(180deg, #3fd998, #23a96f); color: #062417; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  .btn.ghost:hover { color: var(--text); border-color: #36506f; }
+  .btn.small { padding: 6px 10px; font-size: 12.5px; font-weight: 600; }
+  .btn.big { padding: 14px 18px; font-size: 16px; width: 100%; border-radius: 12px; }
+  .play { padding: 18px; font-size: 20px; letter-spacing: 1px; background: linear-gradient(135deg, var(--red) 0%, #ff7a45 100%); color: #fff; border-radius: 14px; box-shadow: 0 10px 30px #ef4b4b55; }
+  .play:disabled { background: #26344a; box-shadow: none; color: var(--muted); }
+
+  /* host/join blocks */
+  .mode { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modebox { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: #0f1722; }
+  .modebox.active { border-color: #3ccf8e88; background: #0f1d1a; }
+  .modebox h3 { margin: 0 0 4px; font-size: 14px; }
+  .addr { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: #0f1722; border: 1px solid var(--line); margin-top: 8px; }
+  .addr code { font-family: "Cascadia Code", Consolas, ui-monospace, Menlo, monospace; font-size: 13.5px; color: var(--gold); }
+  .addr .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1f2b3d; color: var(--muted); }
+  .addr .btn { margin-left: auto; }
+  .banner { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; display: flex; gap: 10px; align-items: center; }
+  .banner.warn { background: #2b2210; border: 1px solid #5a4416; color: #ffd890; }
+  .banner.bad { background: #2c1316; border: 1px solid #5d2329; color: #ffb3b8; }
+  .banner.ok { background: #0f2219; border: 1px solid #1f4f39; color: #9ff0c7; }
+  .banner .btn { margin-left: auto; }
+
+  /* players */
+  .players { display: flex; flex-direction: column; gap: 8px; }
+  .room { font-size: 12px; color: var(--muted); margin: 4px 2px; display: flex; gap: 8px; align-items: center; }
+  .room b { color: var(--gold); letter-spacing: 1px; }
+  .player { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 12px; background: #0f1722; border: 1px solid var(--line); }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: #0d1117; flex: none; }
+  .player .name { font-weight: 600; }
+  .player .meta { font-size: 12px; color: var(--muted); }
+  .badge { margin-left: auto; font-size: 11px; padding: 3px 9px; border-radius: 999px; background: #1f2b3d; color: var(--muted); }
+  .badge.you { background: #3a2a0c; color: var(--gold); }
+  .badge.battle { background: #3a1418; color: #ff9da3; }
+  .empty { color: var(--dim); text-align: center; padding: 18px 8px; font-size: 13px; line-height: 1.5; }
+
+  /* chat */
+  .chat { display: flex; flex-direction: column; height: 360px; }
+  .msgs { flex: 1; overflow-y: auto; padding: 4px 2px 8px; display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin; }
+  .msg { max-width: 85%; padding: 7px 11px; border-radius: 12px; background: #1f2b3d; line-height: 1.4; word-wrap: break-word; }
+  .msg .who { font-size: 11.5px; font-weight: 700; margin-bottom: 1px; }
+  .msg .t { font-size: 10.5px; color: var(--dim); margin-left: 6px; font-weight: 400; }
+  .msg.mine { align-self: flex-end; background: #3a1f25; }
+  .msg.sys { align-self: center; background: transparent; color: var(--dim); font-size: 12px; }
+  .chatbar { display: flex; gap: 8px; margin-top: 8px; }
+
+  /* play checklist */
+  .checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: #0f1722; border: 1px solid var(--line); }
+  .check .mark { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; flex: none; margin-top: 1px; background: #2c1316; color: #ff9da3; }
+  .check.ok .mark { background: #10291d; color: var(--green); }
+  .check.opt .mark { background: #2b2210; color: var(--amber); }
+  .check .l { font-weight: 600; font-size: 13px; }
+  .check .d { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .check .btn { margin-left: auto; }
+
+  /* legends & badges */
+  .legends { display: flex; flex-direction: column; gap: 6px; }
+  .legend { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; background: #0f1722; border: 1px solid var(--line); }
+  .legend .num { font-family: Consolas, ui-monospace, monospace; color: var(--dim); font-size: 12px; width: 38px; }
+  .legend .state { margin-left: auto; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; }
+  .state.owned { background: #3a2a0c; color: var(--gold); }
+  .state.reserved { background: #3a1418; color: #ff9da3; }
+  .badges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .bdg { text-align: center; padding: 10px 4px; border-radius: 12px; border: 1px dashed #2c3c55; color: var(--dim); font-size: 11.5px; }
+  .bdg b { display: block; font-size: 15px; margin-bottom: 2px; color: var(--muted); }
+  .bdg.got { border: 1px solid #6b5418; background: linear-gradient(180deg, #2f240c, #1d170a); color: #f7dc8f; }
+  .bdg.got b { color: var(--gold); }
+  .bdg.champ { grid-column: 1 / -1; }
+
+  /* log drawer */
+  .drawer { position: fixed; left: 0; right: 0; bottom: 0; background: #0b0f15f2; border-top: 1px solid var(--line); backdrop-filter: blur(8px); z-index: 6; }
+  .drawer summary { padding: 10px 22px; cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: none; display: flex; gap: 10px; }
+  .drawer summary::-webkit-details-marker { display: none; }
+  .drawer summary .last { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log { max-height: 220px; overflow-y: auto; padding: 0 22px 14px; font-family: "Cascadia Code", Consolas, ui-monospace, monospace; font-size: 12px; color: #b8c4d6; }
+  .log div span { color: var(--dim); margin-right: 10px; }
+
+  .toast { position: fixed; right: 22px; bottom: 60px; max-width: 420px; padding: 12px 16px; border-radius: 12px; background: #2c1316; border: 1px solid #5d2329; color: #ffd0d3; box-shadow: 0 10px 30px #000a; opacity: 0; transform: translateY(8px); transition: .2s; pointer-events: none; z-index: 9; line-height: 1.45; }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.good { background: #0f2219; border-color: #1f4f39; color: #b9f5d6; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><i></i><i></i></div>
+  <div class="brand"><b>Pokémon Co-op</b><span>Brilliant Diamond · Luminescent · Mega</span></div>
+  <div class="pills">
+    <span class="pill"><span class="dot" id="p-ts"></span><span id="p-ts-t">Tailscale</span></span>
+    <span class="pill"><span class="dot" id="p-host"></span><span id="p-host-t">Not hosting</span></span>
+    <span class="pill"><span class="dot" id="p-join"></span><span id="p-join-t">Not in a room</span></span>
+  </div>
+  <button class="iconbtn" id="quit" title="Stop everything and close">Quit</button>
+</header>
+
+<main>
+  <!-- ============ column 1: connect ============ -->
+  <div class="col">
+    <section class="card">
+      <h2><span class="step">1</span> Connect</h2>
+
+      <div id="ts-box"></div>
+      <div class="sep"></div>
+
+      <form id="settings" autocomplete="off">
+        <div class="grid2">
+          <div><label for="f-name">Trainer name</label><input type="text" id="f-name" maxlength="24" placeholder="Aaroh"></div>
+          <div><label for="f-room">Room code</label><input type="text" id="f-room" maxlength="16" placeholder="AAROH" style="text-transform: uppercase"></div>
+          <div class="full"><label for="f-addr">Server address <span style="color:var(--dim)">(leave empty if you're hosting)</span></label><input type="text" id="f-addr" placeholder="100.67.109.85:4100"></div>
+          <div class="full"><label for="f-pw">Password <span style="color:var(--dim)">(optional)</span></label><input type="password" id="f-pw" maxlength="16" placeholder="none"></div>
+        </div>
+        <div class="row" style="margin-top: 12px">
+          <span class="sub" id="saved-note">Saved in coop.ini</span>
+          <button class="btn small" style="margin-left:auto" type="submit">Save</button>
+        </div>
+      </form>
+
+      <div class="sep"></div>
+
+      <div class="mode">
+        <div class="modebox" id="host-box">
+          <h3>Host</h3>
+          <div class="sub" id="host-sub">Run the server on this PC.</div>
+          <button class="btn red big" style="margin-top:10px" id="host-btn">Start hosting</button>
+        </div>
+        <div class="modebox" id="join-box">
+          <h3>Join</h3>
+          <div class="sub" id="join-sub">Enter the host's address above.</div>
+          <button class="btn green big" style="margin-top:10px" id="join-btn">Join room</button>
+        </div>
+      </div>
+      <div id="host-detail"></div>
+    </section>
+  </div>
+
+  <!-- ============ column 2: players + chat ============ -->
+  <div class="col">
+    <section class="card">
+      <h2>Players <span class="right" id="players-right"></span></h2>
+      <div class="players" id="players"></div>
+    </section>
+    <section class="card chat">
+      <h2>Room chat <span class="right" id="chat-room"></span></h2>
+      <div class="msgs" id="msgs"></div>
+      <form class="chatbar" id="chat-form" autocomplete="off">
+        <input type="text" id="chat-in" maxlength="200" placeholder="Join a room to chat">
+        <button class="btn red" type="submit" id="chat-send">Send</button>
+      </form>
+    </section>
+  </div>
+
+  <!-- ============ column 3: play + progress ============ -->
+  <div class="col col3">
+    <section class="card">
+      <h2><span class="step gold">2</span> Play <span class="right"><a href="#" id="detect" style="color:var(--blue)">Find automatically</a></span></h2>
+      <div class="checks" id="checks"></div>
+      <button class="btn play big" id="play-btn">▶ PLAY</button>
+      <div class="row" style="margin-top:10px; justify-content: space-between">
+        <span class="sub" id="play-sub"></span>
+        <button class="btn ghost small" id="mods-btn">Open mods folder</button>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Legendaries <span class="right">one of each per room</span></h2>
+      <div class="legends" id="legends"></div>
+    </section>
+    <section class="card">
+      <h2>Badges</h2>
+      <div class="badges" id="badges"></div>
+    </section>
+  </div>
+</main>
+
+<details class="drawer" id="drawer">
+  <summary><b>Activity</b><span class="last" id="last-log"></span></summary>
+  <div class="log" id="log"></div>
+</details>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const $ = (id) => document.getElementById(id);
+
+// Build DOM safely: h("div", {class: "x"}, "text", child)
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
+  return el;
+}
+function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter(k => k != null && k !== false)); }
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "X-Coop-Token": TOKEN, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("Error " + res.status));
+  return data;
+}
+
+let toastTimer;
+function toast(msg, good) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (good ? " good" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = "toast", 5000);
+}
+async function act(path, body, okMsg) {
+  try { await api(path, body); if (okMsg) toast(okMsg, true); }
+  catch (e) { toast(e.message); }
+  poll();
+}
+function copy(text, what) {
+  navigator.clipboard.writeText(text).then(() => toast((what || "Copied") + " ✓", true), () => toast("Couldn't copy. Select it and press Ctrl+C."));
+}
+
+const COLORS = ["#ef4b4b", "#f5c451", "#3ccf8e", "#5aa9ff", "#c084fc", "#ff8a5b", "#4dd0e1", "#f472b6"];
+const colorFor = (name) => COLORS[[...(name || "?")].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+const initials = (name) => (name || "?").trim().slice(0, 2).toUpperCase();
+
+const LEGENDS = { 144: "Articuno", 145: "Zapdos", 146: "Moltres", 150: "Mewtwo", 151: "Mew", 243: "Raikou", 244: "Entei", 245: "Suicune",
+  249: "Lugia", 250: "Ho-Oh", 251: "Celebi", 377: "Regirock", 378: "Regice", 379: "Registeel", 380: "Latias", 381: "Latios",
+  382: "Kyogre", 383: "Groudon", 384: "Rayquaza", 385: "Jirachi", 386: "Deoxys", 480: "Uxie", 481: "Mesprit", 482: "Azelf",
+  483: "Dialga", 484: "Palkia", 485: "Heatran", 486: "Regigigas", 487: "Giratina", 488: "Cresselia", 489: "Phione",
+  490: "Manaphy", 491: "Darkrai", 492: "Shaymin", 493: "Arceus" };
+const GYMS = ["Roark", "Gardenia", "Maylene", "Crasher Wake", "Fantina", "Byron", "Candice", "Volkner"];
+const E4 = ["Aaron", "Bertha", "Flint", "Lucian"];
+const fmtTime = (s) => s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m" : Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m";
+
+let S = null, formLoaded = false, lastChatSeq = -1, lastLogSeq = -1, busy = {};
+
+// ---------------------------------------------------------------- render
+function render() {
+  const s = S, host = s.host, join = s.join, ts = s.tailscale, joined = join.state === "online";
+
+  // pills
+  const tsOn = ts.state === "running";
+  $("p-ts").className = "dot " + (tsOn ? "on" : ts.installed ? "warn" : "bad");
+  $("p-ts-t").textContent = tsOn ? "Tailscale " + (ts.ip || "on") : ts.installed ? "Tailscale off" : "No Tailscale";
+  $("p-host").className = "dot " + (host.running ? "on" : "");
+  $("p-host-t").textContent = host.running ? "Hosting · " + fmtTime(host.since_sec) : "Not hosting";
+  $("p-join").className = "dot " + (joined ? "on" : join.reason ? "bad" : "");
+  $("p-join-t").textContent = joined ? "Room " + join.room + (join.rtt_ms ? " · " + join.rtt_ms + " ms" : "") : "Not in a room";
+
+  // form (only fill once, and after saving, so typing isn't overwritten)
+  if (!formLoaded) {
+    $("f-name").value = s.settings.Name || ""; $("f-room").value = s.settings.Room || "";
+    $("f-addr").value = s.settings.Address || ""; $("f-pw").value = s.settings.Password || "";
+    formLoaded = true;
+  }
+
+  // tailscale box
+  let tsBox;
+  if (!ts.installed) {
+    tsBox = h("div", { class: "banner bad" }, h("div", {}, h("b", {}, "Tailscale isn't installed. "), "It lets friends anywhere reach you. Free, sign in with Google/Microsoft/GitHub."),
+      h("button", { class: "btn small red", onclick: () => act("/api/tailscale", { action: "install" }, "Opening the Tailscale download page") }, "Install"));
+  } else if (!tsOn) {
+    tsBox = h("div", { class: "banner warn" }, h("div", {}, h("b", {}, "Tailscale is off. "), "Friends over the internet can't reach you until it's connected."),
+      h("button", { class: "btn small", onclick: () => { toast("Connecting… a sign-in page may open", true); act("/api/tailscale", { action: "connect" }); } }, "Connect"));
+  } else {
+    const online = ts.peers.filter(p => p.online).length;
+    tsBox = h("div", { class: "banner ok" }, h("div", {}, h("b", {}, "Tailscale connected"), " as ", h("b", {}, ts.device || "this PC"),
+      " · " + online + " friend device" + (online === 1 ? "" : "s") + " online"),
+      h("button", { class: "btn small ghost", title: "Share this PC with friends (Tailscale website)", onclick: () => act("/api/tailscale", { action: "share" }, "Opening Tailscale: use ⋯ → Share on this PC") }, "Share PC"));
+  }
+  fill($("ts-box"), tsBox);
+
+  // host / join boxes
+  $("host-box").classList.toggle("active", host.running);
+  $("host-btn").textContent = host.running ? "Stop hosting" : "Start hosting";
+  $("host-btn").className = "btn big " + (host.running ? "ghost" : "red");
+  $("host-sub").textContent = host.running ? (host.status ? host.status.connections + " connected · up " + fmtTime(host.since_sec) : "Running") : "Run the server on this PC.";
+  $("join-box").classList.toggle("active", joined);
+  $("join-btn").textContent = joined ? "Leave room" : "Join room";
+  $("join-btn").className = "btn big " + (joined ? "ghost" : "green");
+  $("join-sub").textContent = joined ? "In " + join.room + " as #" + join.id + (join.rtt_ms ? " · ping " + join.rtt_ms + " ms" : "")
+    : join.reason || (s.settings.Address ? "Ready to join " + s.settings.Address : host.running ? "Join your own server." : "Enter the host's address above.");
+
+  // host details: addresses + invite + firewall
+  const det = [];
+  if (host.error && !host.running) det.push(h("div", { class: "banner bad" }, host.error));
+  if (host.running) {
+    const tsAddr = (tsOn && ts.ip) ? [{ kind: "tailscale", ip: ts.ip }] : host.addrs.filter(a => a.kind === "tailscale");
+    const addrs = [...tsAddr, ...host.addrs.filter(a => a.kind === "lan")];
+    const seen = new Set();
+    det.push(h("div", { class: "sub", style: "margin-top:14px" }, "Friends join with:"));
+    for (const a of addrs) {
+      if (seen.has(a.ip)) continue; seen.add(a.ip);
+      const full = a.ip + ":" + host.port;
+      det.push(h("div", { class: "addr" }, h("code", {}, full), h("span", { class: "tag" }, a.kind === "tailscale" ? "anywhere (Tailscale)" : "same Wi-Fi"),
+        h("button", { class: "btn small ghost", onclick: () => copy(full, "Address copied") }, "Copy")));
+    }
+    if (!addrs.length) det.push(h("div", { class: "banner warn" }, "No network address found. Connect to Wi-Fi or Tailscale."));
+    const best = addrs[0] ? addrs[0].ip + ":" + host.port : "";
+    if (best) {
+      const invite = "Join my Pokémon co-op!\nAddress: " + best + "\nRoom: " + (s.settings.Room || "DEFAULT") + "\nPassword: " + (s.settings.Password || "(none)");
+      det.push(h("button", { class: "btn red", style: "margin-top:10px; width:100%", onclick: () => copy(invite, "Invite copied, paste it to your friends") }, "Copy invite for friends"));
+    }
+    if (host.firewall.supported && !host.firewall.ok)
+      det.push(h("div", { class: "banner warn" }, h("div", {}, "Windows Firewall may block friends."),
+        h("button", { class: "btn small", onclick: () => { toast("Click “Yes” on the Windows prompt", true); act("/api/firewall", {}, "Firewall rules added"); } }, "Allow")));
+  }
+  fill($("host-detail"), det);
+
+  renderPlayers(s);
+  renderChat(join);
+  renderGame(s.game);
+  renderLegends(s);
+  renderBadges(join);
+  renderLog(s.logs);
+}
+
+function playerRow(name, meta, badge) {
+  return h("div", { class: "player" },
+    h("div", { class: "avatar", style: "background:" + colorFor(name) }, initials(name)),
+    h("div", {}, h("div", { class: "name" }, name), h("div", { class: "meta" }, meta)), badge);
+}
+
+function renderPlayers(s) {
+  const out = [], join = s.join, host = s.host;
+  if (host.running && host.status) {
+    const rooms = host.status.rooms || [];
+    $("players-right").textContent = rooms.length ? rooms.reduce((n, r) => n + r.players.length, 0) + " on your server" : "";
+    for (const r of rooms) {
+      out.push(h("div", { class: "room" }, "Room ", h("b", {}, r.code), r.players.length + "/4", r.lobbies ? " · " + r.lobbies + " battle lobby" : ""));
+      for (const p of r.players) {
+        const you = join.state === "online" && join.room === r.code && join.id === p.id;
+        out.push(playerRow(p.name, "Map " + p.zone + " · " + (p.addr || "").replace(/:\d+$/, ""),
+          you ? h("span", { class: "badge you" }, "you") : p.in_battle ? h("span", { class: "badge battle" }, "in battle") : null));
+      }
+    }
+    if (!rooms.length) out.push(h("div", { class: "empty" }, "Server is running. Nobody has joined yet.", h("br"), "Click “Copy invite for friends” and send it."));
+  } else if (join.state === "online") {
+    $("players-right").textContent = "room " + join.room;
+    out.push(playerRow(s.settings.Name || "You", "Map 100 · you", h("span", { class: "badge you" }, "you")));
+    for (const p of join.peers) out.push(playerRow(p.name, "Map " + p.zone + (p.moving ? " · walking" : ""), null));
+    if (!join.peers.length) out.push(h("div", { class: "empty" }, "Nobody else is on your map yet."));
+  } else {
+    $("players-right").textContent = "";
+    out.push(h("div", { class: "empty" }, "Host a server or join a room to see players here."));
+  }
+  fill($("players"), out);
+}
+
+function renderChat(join) {
+  const online = join.state === "online";
+  $("chat-in").disabled = !online; $("chat-send").disabled = !online;
+  $("chat-in").placeholder = online ? "Message room " + join.room + "…" : "Join a room to chat";
+  $("chat-room").textContent = online ? join.room : "";
+  const last = join.chat.length ? join.chat[join.chat.length - 1].seq : 0;
+  if (last === lastChatSeq && $("msgs").childElementCount) return;
+  lastChatSeq = last;
+  const box = $("msgs"), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  if (!join.chat.length) { fill(box, h("div", { class: "empty" }, online ? "Say hi! 👋" : "Chat appears here once you're in a room.")); return; }
+  fill(box, join.chat.map(m => m.from === ""
+    ? h("div", { class: "msg sys" }, m.text)
+    : h("div", { class: "msg" + (m.mine ? " mine" : "") }, h("div", { class: "who", style: "color:" + colorFor(m.from) }, m.mine ? "You" : m.from, h("span", { class: "t" }, m.time)), m.text)));
+  if (atBottom || box.dataset.init !== "1") { box.scrollTop = box.scrollHeight; box.dataset.init = "1"; }
+}
+
+function renderGame(g) {
+  const pickable = { ryujinx: "ryujinx", game: "game" };
+  fill($("checks"), g.checks.map(c => h("div", { class: "check" + (c.ok ? " ok" : c.id === "mega" ? " opt" : "") },
+    h("div", { class: "mark" }, c.ok ? "✓" : c.id === "mega" ? "!" : "✕"),
+    h("div", { style: "min-width:0" }, h("div", { class: "l" }, c.label), h("div", { class: "d" }, c.detail)),
+    pickable[c.id] ? h("button", { class: "btn small ghost", onclick: () => act("/api/game/pick", { what: pickable[c.id] }) }, c.ok ? "Change" : "Browse") : null)));
+  $("play-btn").disabled = !g.ready || busy.play;
+  $("play-sub").textContent = g.ready ? "Starts Ryujinx with your mods." : "Fix the ✕ items to play.";
+}
+
+function renderLegends(s) {
+  let list = [];
+  if (s.host.running && s.host.status) {
+    const room = (s.settings.Room || "DEFAULT").toUpperCase();
+    list = (s.host.status.legends || []).filter(l => l.room === room);
+  } else if (s.join.state === "online") list = s.join.legends;
+  fill($("legends"), list.length ? list.map(l => h("div", { class: "legend" },
+    h("span", { class: "num" }, "#" + String(l.species).padStart(3, "0")), h("b", {}, LEGENDS[l.species] || "Species " + l.species),
+    h("span", { class: "state " + l.state }, l.state === "owned" ? "★ " + l.holder : "⚔ " + l.holder + " is battling")))
+    : h("div", { class: "empty" }, "No legendaries caught in this room yet.", h("br"), "First trainer to catch one keeps it."));
+}
+
+function renderBadges(join) {
+  const got = new Set((join.progress || []).map(p => p.Kind + ":" + p.Target));
+  const tiles = GYMS.map((n, i) => h("div", { class: "bdg" + (got.has("0:" + (i + 1)) ? " got" : "") }, h("b", {}, "Gym " + (i + 1)), n));
+  E4.forEach((n, i) => tiles.push(h("div", { class: "bdg" + (got.has("1:" + (i + 1)) ? " got" : "") }, h("b", {}, "E4 · " + (i + 1)), n)));
+  tiles.push(h("div", { class: "bdg champ" + (got.has("2:1") ? " got" : "") }, h("b", {}, "Champion"), "Cynthia"));
+  fill($("badges"), tiles);
+}
+
+function renderLog(logs) {
+  if (!logs.length) return;
+  const last = logs[logs.length - 1];
+  $("last-log").textContent = last.time + "  " + last.text;
+  if (last.seq === lastLogSeq) return;
+  lastLogSeq = last.seq;
+  const box = $("log");
+  fill(box, logs.map(l => h("div", {}, h("span", {}, l.time), l.text)));
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------------------------------------------------------------- events
+$("settings").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/settings", { Name: $("f-name").value, Room: $("f-room").value, Address: $("f-addr").value, Password: $("f-pw").value });
+    formLoaded = false; toast("Saved", true);
+  } catch (err) { toast(err.message); }
+  poll();
+});
+$("host-btn").onclick = () => act("/api/host", { on: !S.host.running }, S.host.running ? "Server stopped" : "Server started");
+$("join-btn").onclick = async () => {
+  const on = S.join.state !== "online";
+  if (on) { // save what's typed first so Join uses it
+    try { await api("/api/settings", { Name: $("f-name").value, Room: $("f-room").value, Address: $("f-addr").value, Password: $("f-pw").value }); formLoaded = false; }
+    catch (err) { toast(err.message); return; }
+  }
+  act("/api/join", { on }, on ? "Joined!" : "Left the room");
+};
+$("chat-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("chat-in").value.trim();
+  if (!text) return;
+  $("chat-in").value = "";
+  try { await api("/api/chat", { text }); } catch (err) { toast(err.message); }
+  poll();
+});
+$("play-btn").onclick = async () => {
+  busy.play = true; $("play-btn").disabled = true; $("play-btn").textContent = "Starting…";
+  await act("/api/game/play", {}, "Starting the game… enjoy!");
+  setTimeout(() => { busy.play = false; $("play-btn").textContent = "▶ PLAY"; poll(); }, 4000);
+};
+$("detect").onclick = async (e) => {
+  e.preventDefault();
+  try { const r = await api("/api/game/detect", {}); toast(r.found ? "Found " + r.found + " item" + (r.found > 1 ? "s" : "") : "Couldn't find them, use Browse instead", !!r.found); }
+  catch (err) { toast(err.message); }
+  poll();
+};
+$("mods-btn").onclick = () => act("/api/game/mods", {});
+$("quit").onclick = async () => {
+  if (S && S.host.running && !confirm("Stop hosting and close? Friends will be disconnected.")) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  document.body.replaceChildren(h("div", { class: "empty", style: "padding:80px; font-size:16px" }, "Pokémon Co-op has closed. You can close this window."));
+  clearInterval(timer);
+};
+
+// ---------------------------------------------------------------- polling
+let failures = 0;
+async function poll() {
+  try {
+    S = await api("/api/state");
+    failures = 0;
+    render();
+  } catch (e) {
+    if (++failures === 3) toast("Lost contact with the app. Is it still running?");
+  }
+}
+const timer = setInterval(poll, 1000);
+poll();
+</script>
+</body>
+</html>
