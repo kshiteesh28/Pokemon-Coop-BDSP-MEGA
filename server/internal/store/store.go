@@ -24,9 +24,9 @@ type Achievement struct {
 }
 
 type data struct {
-	Version  int                      `json:"version"`
-	Legends  map[uint16]Legend        `json:"legends"`
-	Progress map[string][]Achievement `json:"progress"`
+	Version  int                          `json:"version"`
+	Legends  map[string]map[uint16]Legend `json:"legends"` // room code -> species -> owner
+	Progress map[string][]Achievement     `json:"progress"`
 }
 
 // Store is not safe for concurrent use; the server hub owns it.
@@ -37,7 +37,7 @@ type Store struct {
 
 // Open loads path, or starts empty if it doesn't exist. path "" keeps state in memory.
 func Open(path string) (*Store, error) {
-	s := &Store{path: path, d: data{Version: 1, Legends: map[uint16]Legend{}, Progress: map[string][]Achievement{}}}
+	s := &Store{path: path, d: data{Version: 1, Legends: map[string]map[uint16]Legend{}, Progress: map[string][]Achievement{}}}
 	if path == "" {
 		return s, nil
 	}
@@ -52,7 +52,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if s.d.Legends == nil {
-		s.d.Legends = map[uint16]Legend{}
+		s.d.Legends = map[string]map[uint16]Legend{}
 	}
 	if s.d.Progress == nil {
 		s.d.Progress = map[string][]Achievement{}
@@ -87,20 +87,28 @@ func (s *Store) save() error {
 	return os.Rename(tmp.Name(), s.path)
 }
 
-func (s *Store) Legend(species uint16) (Legend, bool) {
-	l, ok := s.d.Legends[species]
+// Legendaries are tracked per room code: each group has its own one-of-each.
+
+func (s *Store) Legend(room string, species uint16) (Legend, bool) {
+	l, ok := s.d.Legends[room][species]
 	return l, ok
 }
 
-func (s *Store) Legends() map[uint16]Legend { return s.d.Legends }
+func (s *Store) Legends(room string) map[uint16]Legend { return s.d.Legends[room] }
 
-func (s *Store) SetLegend(species uint16, l Legend) error {
-	s.d.Legends[species] = l
+func (s *Store) SetLegend(room string, species uint16, l Legend) error {
+	if s.d.Legends[room] == nil {
+		s.d.Legends[room] = map[uint16]Legend{}
+	}
+	s.d.Legends[room][species] = l
 	return s.save()
 }
 
-func (s *Store) DeleteLegend(species uint16) error {
-	delete(s.d.Legends, species)
+func (s *Store) DeleteLegend(room string, species uint16) error {
+	delete(s.d.Legends[room], species)
+	if len(s.d.Legends[room]) == 0 {
+		delete(s.d.Legends, room)
+	}
 	return s.save()
 }
 
