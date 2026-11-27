@@ -982,8 +982,6 @@ def render_textured_qa(
 # ---------------------------------------------------------------------------
 
 SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
-    # Mega Charizard Y: uses native BDSP animated FireCore/FireMask tail flame
-    "pm0006_52_00": {"pm0006_52_00_fire_mesh_shape"},
     # Mega Blastoise: keep extended mega cannons, skip retracted closed covers
     "pm0009_51_00": {
         "pm0009_51_00_closed_mesh_shape",
