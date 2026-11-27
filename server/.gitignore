@@ -3,3 +3,5 @@
 /*.exe
 /coop-server
 /coop-sim
+/coop-sim-*
+/coop-server-*
