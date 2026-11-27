@@ -58,6 +58,12 @@ if (stones.Count != 92)
     throw new Exception($"Expected 92 Mega Stones in kAllMegaStones, parsed {stones.Count}");
 Console.WriteLine($"Parsed all {stones.Count} Mega Stones from src/mega/main.cpp.");
 
+var primalOrbs = new (int Id, int IconId, string Name, string Desc)[]
+{
+    (534, 534, "Red Orb",  "A shiny red orb that is said to have a legend tied to it. Have Groudon hold it to undergo Primal Reversion in battle."),
+    (535, 535, "Blue Orb", "A shiny blue orb that is said to have a legend tied to it. Have Kyogre hold it to undergo Primal Reversion in battle."),
+};
+
 var keyItems = new (int Id, int IconId, string Name, string Desc)[]
 {
     (696, 111, "Mega Ring",     "This ring contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."),
@@ -133,6 +139,8 @@ static byte[] PackBundleLz4(AssetBundleFile bun, AssetsFile file)
 
     foreach (var s in stones)
         ApplyTemplate(items[s.Id], charcoal, s.IconId);
+    foreach (var o in primalOrbs)
+        ApplyTemplate(items[o.Id], charcoal, o.IconId);
     foreach (var k in keyItems)
         ApplyTemplate(items[k.Id], magmaStone, k.IconId);
 
@@ -172,6 +180,7 @@ static byte[] PackBundleLz4(AssetBundleFile bun, AssetsFile file)
     var inst = am.LoadAssetsFileFromBundle(bun, 0, false);
 
     var allEntries = stones.Select(s => (s.Id, s.Name, s.Desc))
+        .Concat(primalOrbs.Select(o => (o.Id, o.Name, o.Desc)))
         .Concat(keyItems.Select(k => (k.Id, k.Name, k.Desc)))
         .ToList();
 

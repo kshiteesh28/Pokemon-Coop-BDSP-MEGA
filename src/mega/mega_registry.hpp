@@ -45,6 +45,7 @@ constexpr int kTrace         = 36;
 constexpr int kHugePower     = 37;
 constexpr int kInnerFocus    = 39;
 constexpr int kSandStream    = 45;
+constexpr int kDrizzle       = 2;
 constexpr int kThickFat      = 47;
 constexpr int kDrought       = 70;
 constexpr int kPurePower     = 74;
@@ -77,6 +78,8 @@ constexpr int kToughClaws    = 181;
 constexpr int kPixilate      = 182;
 constexpr int kAerilate      = 184;
 constexpr int kParentalBond  = 185;
+constexpr int kPrimordialSea = 189;
+constexpr int kDesolateLand  = 190;
 constexpr int kDeltaStream   = 191;
 constexpr int kSlushRush     = 202;
 constexpr int kGalvanize     = 206;
@@ -164,6 +167,8 @@ constexpr MegaSpeciesEntry kMegaRegistry[] = {
     { 376, 1, 758,0,  80, 145, 150, 105, 110, 110, kToughClaws,    kTypeSteel,    kTypePsychic,  9429, "pm0376_51_00", "pm0376_51_10", true,  "Metagross",   "Mega Metagross",   "Metagrossite" },
     { 380, 1, 684,0,  80, 100, 120, 140, 150, 110, kLevitate,      kTypeDragon,   kTypePsychic,   520, "pm0380_51_00", "pm0380_51_10", true,  "Latias",      "Mega Latias",      "Latiasite" },
     { 381, 1, 685,0,  80, 130, 100, 160, 120, 110, kLevitate,      kTypeDragon,   kTypePsychic,   700, "pm0381_51_00", "pm0381_51_10", true,  "Latios",      "Mega Latios",      "Latiosite" },
+    { 382, 1, 535,0, 100, 150,  90, 180, 160,  90, kPrimordialSea, kTypeWater,    kTypeWater,    4300, "pm0382_51_00", "pm0382_51_10", true,  "Kyogre",      "Primal Kyogre",    "Blue Orb" },
+    { 383, 1, 534,0, 100, 180, 160, 150,  90,  90, kDesolateLand,  kTypeGround,   kTypeFire,     9997, "pm0383_51_00", "pm0383_51_10", true,  "Groudon",     "Primal Groudon",   "Red Orb" },
     { 384, 1, 0, kDragonAscent, 105, 180, 100, 180, 100, 115, kDeltaStream, kTypeDragon, kTypeFlying, 3920, "pm0384_51_00", "pm0384_51_10", true, "Rayquaza", "Mega Rayquaza", "Dragon Ascent" },
 
     // ======================== SINNOH (11) =======================
@@ -191,7 +196,7 @@ constexpr bool isValidBDSPAbility(int abilityId) {
 }
 
 constexpr bool validateMegaRegistry() {
-    if (kMegaRegistryCount != 64) return false;
+    if (kMegaRegistryCount != 66) return false;
     for (size_t i = 0; i < kMegaRegistryCount; ++i) {
         const auto& e = kMegaRegistry[i];
         if (e.species <= 0 || (e.species > 493 && e.species != 609) || e.form <= 0) return false;

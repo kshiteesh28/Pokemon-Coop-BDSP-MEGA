@@ -33,7 +33,7 @@ internal static class Program
         var list = new List<MegaSpec>();
         // { species, form, stone, reqMove, hp, atk, def, spa, spd, spe, ability, type1, type2, weight, "bundle", "shinyBundle", true, "species", "Mega ..." }
         var rx = new Regex(
-            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\S+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),\s*""([^""]+)"",\s*""([^""]+)"",[^\n]*?""(Mega [^""]+)""");
+            @"\{\s*(\d+),\s*(\d+),\s*\d+,\s*\S+,\s*\d+,\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(k[A-Za-z0-9_]+),\s*(kType[A-Za-z]+),\s*(kType[A-Za-z]+),\s*(\d+),\s*""([^""]+)"",\s*""([^""]+)"",[^\n]*?""((?:Mega|Primal) [^""]+)""");
         foreach (Match m in rx.Matches(txt))
         {
             int abil = abilityMap[m.Groups[8].Value];
@@ -159,7 +159,7 @@ internal static class Program
                 {
                     // Keep existing Alolan Raichu (26 f=1) untouched; sync stats/ability on newly appended Z-A Mega rows (>= 1466)
                     int curIdx = fIdx + m.Form - 1;
-                    if (curIdx >= 1466 && !(m.Species == 26 && m.Form == 1))
+                    if ((curIdx >= 1466 || m.Species == 382 || m.Species == 383) && !(m.Species == 26 && m.Form == 1))
                     {
                         var r = pArr[curIdx];
                         r["valid_flag"].AsInt = 1;

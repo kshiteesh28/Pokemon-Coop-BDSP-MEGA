@@ -1029,6 +1029,7 @@ SKIP_SHAPES_BY_PACK: dict[str, set[str]] = {
     "pm0354_51_00": {"pm0354_51_00_eyelid_mesh_shape", "pm0354_51_00_eye_b_mesh_shape"},
     "pm0362_51_00": {"pm0362_51_00_eyelid_mesh_shape"},
     "pm0376_51_00": {"pm0376_51_00_eye_b_mesh_shape"},
+    "pm0382_51_00": {"pm0382_51_00_eye_b_mesh_shape"},
     "pm0428_51_00": {"pm0428_51_00_eyelid_mesh_shape"},
     "pm0485_51_00": {"pm0485_51_00_eyelid_mesh_shape"},
     # Regression-audit fixes: skip overlapping closed wings (Staraptor) and eyelid overlays (Chandelure)

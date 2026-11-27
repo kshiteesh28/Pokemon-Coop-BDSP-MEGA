@@ -87,6 +87,8 @@ constexpr uint16_t kDawnStone = 109;
 constexpr uint16_t kOddKeystone = 111;    // Fallback BDSP keystone icon sprite
 constexpr uint16_t kCharcoal = 249;       // Holdable item in Items pocket (field_func = 0)
 constexpr uint16_t kMagmaStone = 458;     // Non-registerable Key Item (field_func = 0)
+constexpr uint16_t kRedOrb = 534;         // Primal Groudon orb (holdable in Items pocket)
+constexpr uint16_t kBlueOrb = 535;        // Primal Kyogre orb (holdable in Items pocket)
 constexpr uint16_t kAbsoliteZ = 622;      // Safe unused ItemTable slot ("622", < kKeyStone)
 constexpr uint16_t kCharizarditeX = 660;
 constexpr uint16_t kAbsolite = 677;
@@ -271,9 +273,17 @@ constexpr bool isSupportedMegaSpecies(int species) {
     return false;
 }
 
+constexpr bool isPrimalOrb(int32_t itemId) {
+    return itemId == kRedOrb || itemId == kBlueOrb;
+}
+
+constexpr bool isPrimalEntry(const MegaSpeciesEntry* e) {
+    return e != nullptr && (e->species == 382 || e->species == 383);
+}
+
 constexpr bool validateRegistryAgainstStoneCatalog() {
     for (const auto& e : kMegaRegistry) {
-        if (e.stoneItemId != 0 && findMegaStoneCatalog(e.stoneItemId) == nullptr) {
+        if (e.stoneItemId != 0 && !isPrimalOrb(e.stoneItemId) && findMegaStoneCatalog(e.stoneItemId) == nullptr) {
             return false;
         }
     }
@@ -396,8 +406,14 @@ inline void revertMegaFormInParty() {
                     } else {
                         member->ChangeFormNo(kBaseForm, nullptr);
                     }
-                    if (isTrackedPlayerMega && gPlayerPreMegaTokusei > 0 && member->fields.m_accessor != nullptr) {
-                        member->fields.m_accessor->SetTokuseiNo(gPlayerPreMegaTokusei);
+                    if (member->fields.m_accessor != nullptr) {
+                        if (isTrackedPlayerMega && gPlayerPreMegaTokusei > 0) {
+                            member->fields.m_accessor->SetTokuseiNo(gPlayerPreMegaTokusei);
+                        } else if (monsNo == 382) {
+                            member->fields.m_accessor->SetTokuseiNo(kDrizzle);
+                        } else if (monsNo == 383) {
+                            member->fields.m_accessor->SetTokuseiNo(kDrought);
+                        }
                     }
                 }
             }
@@ -717,6 +733,9 @@ inline void patchItemTableInMemory() {
         }
     }
 
+    applyTemplate(items->m_Items[kRedOrb], charcoal, nullptr);
+    applyTemplate(items->m_Items[kBlueOrb], charcoal, nullptr);
+
     applyTemplate(items->m_Items[kMegaBracelet], magmaStone, oddKeystone);
     applyTemplate(items->m_Items[kMegaRing], magmaStone, oddKeystone);
     applyTemplate(items->m_Items[kKeyStone], magmaStone, oddKeystone);
@@ -870,6 +889,16 @@ inline const char* lookupMegaItemTextById(int32_t itemId, bool isItemInfo) {
     if (const auto* stone = findMegaStoneCatalog(itemId); stone != nullptr) {
         return isItemInfo ? stone->stoneDesc : stone->stoneName;
     }
+    if (itemId == kRedOrb) {
+        return isItemInfo
+            ? "A shiny red orb that is said to have a legend tied to it. Have Groudon hold it to undergo Primal Reversion in battle."
+            : "Red Orb";
+    }
+    if (itemId == kBlueOrb) {
+        return isItemInfo
+            ? "A shiny blue orb that is said to have a legend tied to it. Have Kyogre hold it to undergo Primal Reversion in battle."
+            : "Blue Orb";
+    }
     if (itemId == kMegaRing) {
         return isItemInfo
             ? "This ring contains an untold power that somehow enables Pokémon carrying Mega Stones to Mega Evolve in battle."
@@ -961,12 +990,21 @@ inline const MegaSpeciesEntry* matchMegaCandidate(Dpr::Battle::Logic::BTL_POKEPA
     return nullptr;
 }
 
+inline const MegaSpeciesEntry* matchPrimalCandidate(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
+    if (pokeParam == nullptr || pokeParam->IsDead() || pokeParam->HENSIN_Check() || !gMegaBattleAllowed) {
+        return nullptr;
+    }
+    const auto* candidate = matchMegaCandidate(pokeParam);
+    return isPrimalEntry(candidate) ? candidate : nullptr;
+}
+
 inline const MegaSpeciesEntry* targetMegaEntry(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam) {
     if (pokeParam == nullptr || pokeParam->HENSIN_Check() || !gMegaBattleAllowed ||
         !hasMegaAccessoryInBag() || gClientMegaUsed[0]) {
         return nullptr;
     }
-    return matchMegaCandidate(pokeParam);
+    const auto* candidate = matchMegaCandidate(pokeParam);
+    return isPrimalEntry(candidate) ? nullptr : candidate;
 }
 
 inline const MegaSpeciesEntry* targetTrainerMegaEntry(Dpr::Battle::Logic::BTL_POKEPARAM::Object* pokeParam,
@@ -976,7 +1014,8 @@ inline const MegaSpeciesEntry* targetTrainerMegaEntry(Dpr::Battle::Logic::BTL_PO
         clientID == 0 || clientID >= kMaxBattleClients || gClientMegaUsed[clientID]) {
         return nullptr;
     }
-    return matchMegaCandidate(pokeParam);
+    const auto* candidate = matchMegaCandidate(pokeParam);
+    return isPrimalEntry(candidate) ? nullptr : candidate;
 }
 
 // Safe wrapper for BTL_ACTION_PARAM::get_gen_cmd passing explicit nullptr MethodInfo* in x1.
@@ -1097,6 +1136,8 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
     }
 
     auto* bpp = wazaList->fields._btlPokeParam;
+    const auto* primalEntry = matchPrimalCandidate(bpp);
+    const bool isPrimal = primalEntry != nullptr;
     const auto* candidate = matchMegaCandidate(bpp);
     const bool hasRing = hasMegaAccessoryInBag();
     const bool playerMegaUsed = gClientMegaUsed[0];
@@ -1111,7 +1152,8 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
                             (gMegaArmed ? 2 : 0) |
                             (playerMegaUsed ? 4 : 0) |
                             (hasRing ? 8 : 0) |
-                            (candidate != nullptr ? 16 : 0);
+                            (candidate != nullptr ? 16 : 0) |
+                            (isPrimal ? 32 : 0);
     if (!forceRefresh && sLastWazaList == wazaList && sLastEntry == entry && sLastBannerState == bannerState) {
         return;
     }
@@ -1126,7 +1168,10 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
         UnityEngine::Color::Object textColor{};
         textColor.fields = { .r = 0.65f, .g = 0.65f, .b = 0.70f, .a = 1.0f };
 
-        if (eligible && gMegaArmed) {
+        if (isPrimal) {
+            label = "PRIMAL REVERSION AUTO";
+            textColor.fields = { .r = 1.0f, .g = 0.90f, .b = 0.20f, .a = 1.0f };
+        } else if (eligible && gMegaArmed) {
             std::snprintf(bannerBuf, sizeof(bannerBuf), "%s ACTIVE", entry->megaName);
             label = bannerBuf;
             textColor.fields = { .r = 1.0f, .g = 0.92f, .b = 0.20f, .a = 1.0f };
@@ -1151,7 +1196,9 @@ inline void updateMegaBattleBanner(Dpr::Battle::View::UI::BUIWazaList::Object* w
             wazaList->fields._wazaDescriptionButton);
         if (descBtn->fields._backgroundImage != nullptr) {
             UnityEngine::Color::Fields bgColor{};
-            if (eligible && gMegaArmed) {
+            if (isPrimal) {
+                bgColor = { .r = 0.86f, .g = 0.24f, .b = 0.12f, .a = 1.0f };
+            } else if (eligible && gMegaArmed) {
                 bgColor = { .r = 0.95f, .g = 0.18f, .b = 0.58f, .a = 1.0f };
             } else if (eligible) {
                 bgColor = { .r = 0.12f, .g = 0.62f, .b = 0.95f, .a = 1.0f };
@@ -1194,7 +1241,9 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
         return false;
     }
     const uint8_t clientID = pokeAction->fields.clientID;
-    const auto* entry = (clientID == 0) ? targetMegaEntry(param) : targetTrainerMegaEntry(param, clientID);
+    const auto* primal = matchPrimalCandidate(param);
+    const auto* entry = (primal != nullptr) ? primal
+                      : ((clientID == 0) ? targetMegaEntry(param) : targetTrainerMegaEntry(param, clientID));
     if (entry == nullptr) {
         return false;
     }
@@ -1204,7 +1253,7 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     if (pokeID < kMaxBattlePokes) {
         gPreMegaTokuseiByPokeID[pokeID] = prevTokusei;
     }
-    if (clientID == 0) {
+    if (clientID == 0 && !isPrimalEntry(entry)) {
         gPlayerMegaSpecies = entry->species;
         gPlayerMegaForm = entry->form;
         gPlayerPreMegaTokusei = prevTokusei;
@@ -1317,8 +1366,9 @@ HOOK_DEFINE_TRAMPOLINE(ItemData$$GetParam) {
             mega::revertMegaFormInParty();
         }
         const auto* stone = mega::findMegaStoneCatalog(itemno);
+        const bool isOrb = mega::isPrimalOrb(itemno);
         const bool isKey = mega::isMegaKeyItem(itemno);
-        if (prmID == Pml::Item::ItemData::PrmID::INACTIVE && (stone != nullptr || isKey)) {
+        if (prmID == Pml::Item::ItemData::PrmID::INACTIVE && (stone != nullptr || isOrb || isKey)) {
             return 0;
         }
         if (prmID == Pml::Item::ItemData::PrmID::ICONID) {
@@ -1676,7 +1726,12 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                 char msgBuf[192];
                 const bool isPlayer = (mega::gCurrentEvoClientID == 0);
                 if (mega::utf16ContainsAscii(label, "1572") || mega::utf16ContainsAscii(label, "megaevostart")) {
-                    if (md->requiredMoveId > 0 && md->stoneItemId == 0) {
+                    if (mega::isPrimalEntry(md)) {
+                        std::snprintf(msgBuf, sizeof(msgBuf),
+                                      isPlayer ? "%s's Primal Reversion! It reverted to its primal form!"
+                                               : "The opposing %s's Primal Reversion! It reverted to its primal form!",
+                                      md->speciesName);
+                    } else if (md->requiredMoveId > 0 && md->stoneItemId == 0) {
                         std::snprintf(msgBuf, sizeof(msgBuf),
                                       isPlayer ? "Your fervent wish has reached %s!"
                                                : "A fervent wish has reached the opposing %s!",
@@ -1696,10 +1751,17 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                     return System::String::Create(msgBuf);
                 }
                 if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
-                    std::snprintf(msgBuf, sizeof(msgBuf),
-                                  isPlayer ? "%s has Mega Evolved into %s!"
-                                           : "The opposing %s has Mega Evolved into %s!",
-                                  md->speciesName, md->megaName);
+                    if (mega::isPrimalEntry(md)) {
+                        std::snprintf(msgBuf, sizeof(msgBuf),
+                                      isPlayer ? "%s reverted to %s!"
+                                               : "The opposing %s reverted to %s!",
+                                      md->speciesName, md->megaName);
+                    } else {
+                        std::snprintf(msgBuf, sizeof(msgBuf),
+                                      isPlayer ? "%s has Mega Evolved into %s!"
+                                               : "The opposing %s has Mega Evolved into %s!",
+                                      md->speciesName, md->megaName);
+                    }
                     return System::String::Create(msgBuf);
                 }
             }
@@ -1848,7 +1910,8 @@ HOOK_DEFINE_TRAMPOLINE(ProcessActionCore$$action) {
             pokeAction->fields.actionCategory == Dpr::Battle::Logic::PokeActionCategory::Mega_Evolution) {
             auto* container = reinterpret_cast<Dpr::Battle::Logic::SectionContainer::Object*>(
                 __this->fields.m_pSectionContainer);
-            if (mega::executeMegaEvolution(container, pokeAction)) {
+            const bool wasPrimal = mega::matchPrimalCandidate(pokeAction->fields.bpp) != nullptr;
+            if (mega::executeMegaEvolution(container, pokeAction) && !wasPrimal) {
                 const uint8_t cid = pokeAction->fields.clientID;
                 if (cid < mega::kMaxBattleClients) {
                     mega::gClientMegaUsed[cid] = true;
@@ -1914,7 +1977,24 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
             }
         }
 
-        bool anyMega = (trainerMegaSlot >= 0);
+        // Auto-detect Primal Reversion (Groudon + Red Orb, Kyogre + Blue Orb) for any client without consuming Mega slot.
+        uint8_t primalSlotMask = 0;
+        if (mega::gMegaBattleAllowed) {
+            for (uint8_t idx = 0; idx < numAction && idx < 8; ++idx) {
+                auto* rawInst = Dpr::Battle::Logic::SVCL_ACTION::Get(instructions, clientID, idx);
+                if (rawInst == nullptr) {
+                    continue;
+                }
+                Dpr::Battle::Logic::BTL_ACTION_PARAM::Object probe{};
+                probe.fields.raw = rawInst->fields.raw;
+                auto* bpp = __this->getActionPoke(&probe, clientID);
+                if (mega::matchPrimalCandidate(bpp) != nullptr) {
+                    primalSlotMask |= static_cast<uint8_t>(1U << idx);
+                }
+            }
+        }
+
+        bool anyMega = (trainerMegaSlot >= 0) || (primalSlotMask != 0);
         if (!anyMega) {
             for (uint8_t idx = 0; idx < numAction; ++idx) {
                 auto* rawInst = Dpr::Battle::Logic::SVCL_ACTION::Get(instructions, clientID, idx);
@@ -1939,17 +2019,20 @@ HOOK_DEFINE_TRAMPOLINE(createPokeAction_FromClientInstruction) {
                 }
                 Dpr::Battle::Logic::BTL_ACTION_PARAM::Object inst{};
                 inst.fields.raw = rawInst->fields.raw;
-                if (static_cast<int>(idx) == trainerMegaSlot) {
+                const bool isPrimalSlot = (idx < 8) && ((primalSlotMask & (1U << idx)) != 0);
+                if (isPrimalSlot || static_cast<int>(idx) == trainerMegaSlot) {
                     inst.fields.raw |= static_cast<long>(mega::kMegaFlagMask);
                 }
 
                 if (mega::getMegaFlag(inst)) {
-                    if (!queuedMegaForClient && !clientUsedMega) {
+                    if (isPrimalSlot || (!queuedMegaForClient && !clientUsedMega)) {
                         auto* megaAction = Dpr::Battle::Logic::PokeAction::newInstance();
                         if (megaAction != nullptr &&
                             __this->setupPokeAction_FromClientInstruction(megaAction, &inst, clientID)) {
                             actionContainer->Add(&megaAction);
-                            queuedMegaForClient = true;
+                            if (!isPrimalSlot) {
+                                queuedMegaForClient = true;
+                            }
                         }
                     }
                     inst.fields.raw &= ~static_cast<long>(mega::kMegaFlagMask);

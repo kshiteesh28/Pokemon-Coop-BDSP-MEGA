@@ -100,11 +100,13 @@ MEGA_CATALOG: tuple[MegaFormSpec, ...] = (
     MegaFormSpec(359, 1, "Mega Absol",       "hoenn",  51, 677,  True,  1.00),
     MegaFormSpec(359, 2, "Mega Absol Z",     "hoenn",  52, 622,  True,  1.02),
     MegaFormSpec(362, 1, "Mega Glalie",      "hoenn",  51, 763,  False, 1.04),
-    MegaFormSpec(373, 1, "Mega Salamence",   "hoenn",  51, 769,  True,  1.04),
+    MegaFormSpec(373, 1, "Mega Salamence",   "hoenn",  51, 769,  True,  0.72),
     MegaFormSpec(376, 1, "Mega Metagross",   "hoenn",  51, 758,  False, 1.04),
     MegaFormSpec(380, 1, "Mega Latias",      "hoenn",  51, 684,  False, 1.04),
     MegaFormSpec(381, 1, "Mega Latios",      "hoenn",  51, 685,  True,  1.04),
-    MegaFormSpec(384, 1, "Mega Rayquaza",    "hoenn",  51, 0,    True,  1.06),
+    MegaFormSpec(382, 1, "Primal Kyogre",    "hoenn",  51, 535,  False, 1.05),
+    MegaFormSpec(383, 1, "Primal Groudon",   "hoenn",  51, 534,  False, 1.05),
+    MegaFormSpec(384, 1, "Mega Rayquaza",    "hoenn",  51, 0,    True,  0.29),
     # --- Sinnoh (11) ---
     MegaFormSpec(398, 1, "Mega Staraptor",   "sinnoh", 51, 1082, True,  1.04),
     MegaFormSpec(428, 1, "Mega Lopunny",     "sinnoh", 51, 768,  False, 1.02),
@@ -125,7 +127,7 @@ BY_NORMAL_BUNDLE: dict[str, MegaFormSpec] = {m.normal_bundle: m for m in MEGA_CA
 
 
 def validate_catalog() -> None:
-    assert len(MEGA_CATALOG) == 64, f"Expected 64 playable Mega forms, got {len(MEGA_CATALOG)}"
+    assert len(MEGA_CATALOG) == 66, f"Expected 66 playable Mega/Primal forms, got {len(MEGA_CATALOG)}"
     seen_keys = set()
     seen_bundles = set()
     seen_cabs = set()
