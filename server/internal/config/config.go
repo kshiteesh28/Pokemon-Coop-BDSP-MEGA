@@ -69,3 +69,14 @@ func LoadClient(path string) (Client, bool, error) {
 	}
 	return Client{Address: m["address"], Room: m["room"], Name: m["name"], Password: m["password"]}, true, nil
 }
+
+// SaveClient writes c to path in the standard coop.ini layout (Windows line
+// endings so Notepad shows it nicely; the parser accepts either).
+func SaveClient(path string, c Client) error {
+	text := "# Pokemon co-op settings (used by the launcher, join scripts and the game)\r\n" +
+		"address  = " + c.Address + "\r\n" +
+		"room     = " + c.Room + "\r\n" +
+		"name     = " + c.Name + "\r\n" +
+		"password = " + c.Password + "\r\n"
+	return os.WriteFile(path, []byte(text), 0o600)
+}
