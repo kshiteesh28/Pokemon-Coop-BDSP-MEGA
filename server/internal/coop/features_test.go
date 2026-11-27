@@ -362,3 +362,35 @@ func TestHelperWithBadgeCanJoin(t *testing.T) {
 	}
 	_ = ackNew
 }
+
+func TestRoomChat(t *testing.T) {
+	addr := startServer(t, Config{})
+	a, ackA := joinID(t, addr, "C", "Ash", 1)
+	b, _ := joinID(t, addr, "C", "Brock", 2)
+	other, _ := joinID(t, addr, "OTHER", "Misty", 3)
+
+	a.Send(protocol.MsgChat, (&protocol.ChatSend{Text: "  hi \x07there  "}).Marshal())
+	for _, cl := range []*mockclient.Client{a, b} { // sender gets its own message too
+		var m protocol.ChatMessage
+		recv(t, cl, protocol.MsgChat, &m)
+		if m.PlayerID != ackA.PlayerID || m.Name != "Ash" || m.Text != "hi there" {
+			t.Fatalf("chat %+v", m)
+		}
+	}
+	if _, err := other.WaitFor(protocol.MsgChat, 300*time.Millisecond); err == nil {
+		t.Fatal("chat leaked to another room")
+	}
+	// Flooding: after the burst, the sender gets a warning (PlayerID 0) instead.
+	for i := 0; i < 10; i++ {
+		a.Send(protocol.MsgChat, (&protocol.ChatSend{Text: "spam"}).Marshal())
+	}
+	warned := false
+	for i := 0; i < 10 && !warned; i++ {
+		var m protocol.ChatMessage
+		recv(t, a, protocol.MsgChat, &m)
+		warned = m.PlayerID == 0
+	}
+	if !warned {
+		t.Fatal("no rate-limit warning")
+	}
+}
