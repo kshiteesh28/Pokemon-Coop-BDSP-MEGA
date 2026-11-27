@@ -307,3 +307,58 @@ func TestBattleTurnTimeoutAndDrop(t *testing.T) {
 		}
 	}
 }
+
+func TestHelperWithBadgeCanJoin(t *testing.T) {
+	addr := startServer(t, Config{})
+	vet, ackVet := joinID(t, addr, "H", "Cynthia", 10)
+	newb, ackNew := joinID(t, addr, "H", "Lucas", 11)
+
+	solo := func(c *mockclient.Client) protocol.BattleLobby {
+		c.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleGym, Target: 1, MaxPlayers: 1}).Marshal())
+		l := lobbyOf(t, c)
+		c.Send(protocol.MsgBattleReady, (&protocol.BattleReady{LobbyID: l.LobbyID, Ready: 1}).Marshal())
+		lobbyOf(t, c)
+		c.Send(protocol.MsgBattleStart, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+		var st protocol.BattleStart
+		recv(t, c, protocol.MsgBattleStart, &st)
+		c.Send(protocol.MsgBattleResult, (&protocol.BattleResult{LobbyID: l.LobbyID, Outcome: protocol.OutcomeWin}).Marshal())
+		var end protocol.BattleEnd
+		recv(t, c, protocol.MsgBattleEnd, &end)
+		return l
+	}
+	solo(vet) // Cynthia already has gym 1
+
+	// Lucas hosts gym 1 and Cynthia joins to help.
+	newb.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleGym, Target: 1, MaxPlayers: 2}).Marshal())
+	l := lobbyOf(t, newb)
+	vet.Send(protocol.MsgBattleJoin, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	var lb protocol.BattleLobby
+	for len(lb.Members) < 2 {
+		lb = lobbyOf(t, newb)
+	}
+	for _, m := range lb.Members {
+		want := uint8(0)
+		if m.PlayerID == ackVet.PlayerID {
+			want = 1
+		}
+		if m.Completed != want {
+			t.Fatalf("completed flag wrong: %+v", lb.Members)
+		}
+	}
+	for _, c := range []*mockclient.Client{newb, vet} {
+		c.Send(protocol.MsgBattleReady, (&protocol.BattleReady{LobbyID: l.LobbyID, Ready: 1}).Marshal())
+	}
+	time.Sleep(100 * time.Millisecond)
+	newb.Send(protocol.MsgBattleStart, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	var st protocol.BattleStart
+	recv(t, newb, protocol.MsgBattleStart, &st)
+	newb.Send(protocol.MsgBattleResult, (&protocol.BattleResult{LobbyID: l.LobbyID, Outcome: protocol.OutcomeWin}).Marshal())
+	var pr protocol.Progress
+	for len(pr.Entries) == 0 {
+		recv(t, newb, protocol.MsgProgress, &pr)
+	}
+	if pr.Entries[0] != (protocol.ProgressEntry{Kind: protocol.BattleGym, Target: 1}) {
+		t.Fatalf("Lucas should now have gym 1: %+v", pr)
+	}
+	_ = ackNew
+}
