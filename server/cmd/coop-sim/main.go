@@ -30,8 +30,15 @@ func main() {
 	perRoom := flag.Int("per-room", 4, "players per room")
 	duration := flag.Duration("duration", 20*time.Second, "how long to run")
 	password := flag.String("password", os.Getenv("COOP_PASSWORD"), "server password")
+	roomFlag := flag.String("room", "", "join this room code (default: SIM-1, SIM-2, ... filled -per-room at a time)")
 	flag.Parse()
 
+	roomFor := func(i int) string {
+		if *roomFlag != "" {
+			return *roomFlag
+		}
+		return fmt.Sprintf("SIM-%d", i / *perRoom + 1)
+	}
 	start := time.Now()
 	results := make([]*stats, *players)
 	var wg sync.WaitGroup
@@ -40,7 +47,7 @@ func main() {
 		results[i] = &stats{name: fmt.Sprintf("Bot%02d", i+1)}
 		go func(i int) {
 			defer wg.Done()
-			run(*addr, fmt.Sprintf("SIM-%d", i / *perRoom + 1), i, *password, *duration, start, results[i])
+			run(*addr, roomFor(i), i, *password, *duration, start, results[i])
 		}(i)
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -53,11 +60,11 @@ func main() {
 		if r.pongs > 0 {
 			rtt = (r.rttSum / time.Duration(r.pongs)).Round(100 * time.Microsecond).String()
 		}
-		fmt.Printf("%-6s %-8s %9d %6d %7d %8s", r.name, fmt.Sprintf("SIM-%d", i / *perRoom + 1), r.snapshots, r.metas, r.leaves, rtt)
+		fmt.Printf("%-6s %-8s %9d %6d %7d %8s", r.name, roomFor(i), r.snapshots, r.metas, r.leaves, rtt)
 		if r.err != nil {
 			fmt.Printf("  ERROR: %v", r.err)
 			failed++
-		} else if r.snapshots == 0 && *perRoom > 1 {
+		} else if r.snapshots == 0 && *perRoom > 1 && *roomFlag == "" {
 			fmt.Printf("  ERROR: no snapshots")
 			failed++
 		}
