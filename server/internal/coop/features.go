@@ -96,6 +96,8 @@ func (s *Server) handleFeature(c *client, t protocol.MsgType, p []byte, now time
 		if m.Unmarshal(p) == nil {
 			s.battleAction(c, m, now)
 		}
+	case protocol.MsgChat:
+		s.onChat(c, p, now)
 	case protocol.MsgBattleResult:
 		var m protocol.BattleResult
 		if m.Unmarshal(p) == nil {
@@ -484,4 +486,24 @@ func (s *Server) featureTick(now time.Time) {
 			s.maybeFinishTurn(l, true)
 		}
 	}
+}
+
+// ---------------------------------------------------------------- room chat
+
+func (s *Server) onChat(c *client, p []byte, now time.Time) {
+	var m protocol.ChatSend
+	m.Unmarshal(p)
+	text := strings.TrimSpace(m.Text)
+	if text == "" {
+		return
+	}
+	if !c.chat.take(now) {
+		s.send(c, protocol.MsgChat, (&protocol.ChatMessage{Name: "", Text: "You're sending messages too fast."}).Marshal())
+		return
+	}
+	out := (&protocol.ChatMessage{PlayerID: c.pid, Name: c.app.Name, Text: text}).Marshal()
+	for _, peer := range c.room.players {
+		s.send(peer, protocol.MsgChat, out)
+	}
+	s.vlogf("room %s chat <%s> %s", c.room.code, c.app.Name, text)
 }
