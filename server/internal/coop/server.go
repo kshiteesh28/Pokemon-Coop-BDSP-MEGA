@@ -93,6 +93,7 @@ type Server struct {
 	reservations map[legendKey]*reservation
 	lobbies      map[uint16]*lobby
 	nextLobby    uint16
+	statusCh     chan statusReq
 }
 
 type eventKind int
@@ -163,7 +164,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{cfg: cfg, events: make(chan event, 1024), clients: map[*client]struct{}{}, rooms: map[string]*room{},
-		store: st, legendSet: map[uint16]bool{}, reservations: map[legendKey]*reservation{}, lobbies: map[uint16]*lobby{}}
+		store: st, legendSet: map[uint16]bool{}, reservations: map[legendKey]*reservation{}, lobbies: map[uint16]*lobby{}, statusCh: make(chan statusReq)}
 	for _, sp := range cfg.Legendaries {
 		s.legendSet[sp] = true
 	}
@@ -289,6 +290,8 @@ func (s *Server) hub(ctx context.Context) {
 					s.handle(ev.c, ev.hdr, ev.payload)
 				}
 			}
+		case req := <-s.statusCh:
+			req.reply <- s.buildStatus()
 		case <-tick.C:
 			s.broadcastSnapshots()
 		case now := <-reap.C:
