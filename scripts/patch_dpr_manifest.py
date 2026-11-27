@@ -157,7 +157,51 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> int:
         new_path_arrays.extend(encode_array_single_string(paths_arr_id, path_str_id, asset_path.lower()))
         print(f"Registered {bundle_name} (rec_id=0x{rec_id:x}, size={file_size:,}, deps_id=0x{deps_id:x})")
 
-    new_count = orig_count + len(entries)
+    # Also register custom Primal/Mega battle weather VFX bundles in romfs-delta/Effects/effect/prefab/battle/
+    custom_weather_specs = [
+        ("et005_heavyrain01",   b"effect/prefab/battle/et001_rain01"),
+        ("et006_extremesun01",  b"effect/prefab/battle/et004_sunny01"),
+        ("et007_strongwinds01", b"effect/prefab/battle/et003_sandstorm01"),
+    ]
+    weather_entries: list[tuple[str, str, int, Path]] = []
+    for w_name, donor_marker in custom_weather_specs:
+        w_file = delta_root / "Effects" / "effect" / "prefab" / "battle" / w_name
+        if not w_file.exists():
+            continue
+        w_bundle = f"effect/prefab/battle/{w_name}"
+        w_asset = f"assets/effect/prefab/battle/{w_name}.prefab"
+        if data.find(w_bundle.encode("utf-8")) != -1:
+            continue
+        dp_idx = data.find(donor_marker)
+        if dp_idx == -1:
+            raise ValueError(f"Could not find donor weather record {donor_marker!r} in Dpr.bin")
+        deps_pos = dp_idx + len(donor_marker) + 25 + 8 + 1
+        w_deps_id = struct.unpack_from("<I", data, deps_pos + 1)[0]
+        weather_entries.append((w_bundle, w_asset, w_deps_id, w_file))
+
+    for w_bundle, w_asset, w_deps_id, w_file in weather_entries:
+        file_size = w_file.stat().st_size
+        rec_id = next_id; next_id += 1
+        proj_str_id = next_id; next_id += 1
+        name_str_id = next_id; next_id += 1
+        paths_arr_id = next_id; next_id += 1
+        path_str_id = next_id; next_id += 1
+        hash_obj_id = next_neg_id; next_neg_id -= 1
+
+        new_refs.extend(b"\x09" + struct.pack("<I", rec_id))
+        new_record_objs.extend(b"\x01" + struct.pack("<II", rec_id, RECORD_METADATA_ID))
+        new_record_objs.extend(encode_binary_string(proj_str_id, "Effects"))
+        new_record_objs.extend(encode_binary_string(name_str_id, w_bundle))
+        new_record_objs.extend(b"\x01" + struct.pack("<iI", hash_obj_id, HASH_METADATA_ID) + b"\x00" * 16)
+        new_record_objs.extend(battle_datetime + b"\x00")
+        new_record_objs.extend(b"\x09" + struct.pack("<I", w_deps_id))
+        new_record_objs.extend(b"\x09" + struct.pack("<I", paths_arr_id))
+        new_record_objs.extend(struct.pack("<q", file_size))
+
+        new_path_arrays.extend(encode_array_single_string(paths_arr_id, path_str_id, w_asset.lower()))
+        print(f"Registered {w_bundle} (rec_id=0x{rec_id:x}, size={file_size:,}, deps_id=0x{w_deps_id:x})")
+
+    new_count = orig_count + len(entries) + len(weather_entries)
     out = bytearray()
     out.extend(data[:RECORDS_LEN_OFFSET])
     out.extend(struct.pack("<I", new_count))
@@ -176,6 +220,8 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> int:
         (delta_root / "Dpr" / "ev_script", b"\x03Dpr\x06\x8cc\x00\x00\x09ev_script", "Dpr/ev_script"),
         (delta_root / "UIs" / "masterdatas" / "uimasterdatas", b"\x03UIs\x06\xa5:\x01\x00\x19masterdatas/uimasterdatas", "UIs/masterdatas/uimasterdatas"),
         (delta_root / "UIs" / "textures_mass" / "texturemass", b"\x03UIs\x06\x98`\x01\x00\x19textures_mass/texturemass", "UIs/textures_mass/texturemass"),
+        (delta_root / "Battle" / "battle_masterdatas", b"\x06Battle\x06\x8a\x1e\x01\x00\x12battle_masterdatas", "Battle/battle_masterdatas"),
+        (delta_root / "Effects" / "masterdatas" / "effectdatabase", b"\x07Effects\x06\x85\x1e\x01\x00\x1amasterdatas/effectdatabase", "Effects/masterdatas/effectdatabase"),
     ]
     for path, marker, label in size_updates:
         if path.exists():
