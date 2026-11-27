@@ -114,6 +114,15 @@ func (s *Store) DeleteLegend(room string, species uint16) error {
 
 func (s *Store) Progress(key string) []Achievement { return s.d.Progress[key] }
 
+func (s *Store) HasAchievement(key string, a Achievement) bool {
+	for _, x := range s.d.Progress[key] {
+		if x == a {
+			return true
+		}
+	}
+	return false
+}
+
 // AddAchievement records a win; returns false if it was already recorded.
 func (s *Store) AddAchievement(key string, a Achievement) (bool, error) {
 	for _, x := range s.d.Progress[key] {
