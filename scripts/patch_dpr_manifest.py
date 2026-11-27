@@ -173,6 +173,7 @@ def patch_dpr_bin(source: Path, delta_root: Path, output: Path) -> int:
         (delta_root / "Message" / "english", b"\x07Message\x06\x1e:\x01\x00\x07english", "Message/english"),
         (delta_root / "Pml" / "personal_masterdatas", b"\x03Pml\x06P:\x01\x00\x14personal_masterdatas", "Pml/personal_masterdatas"),
         (delta_root / "Dpr" / "masterdatas", b"\x03Dpr\x06\xd2c\x00\x00\x0bmasterdatas", "Dpr/masterdatas"),
+        (delta_root / "Dpr" / "ev_script", b"\x03Dpr\x06\x8cc\x00\x00\x09ev_script", "Dpr/ev_script"),
         (delta_root / "UIs" / "masterdatas" / "uimasterdatas", b"\x03UIs\x06\xa5:\x01\x00\x19masterdatas/uimasterdatas", "UIs/masterdatas/uimasterdatas"),
         (delta_root / "UIs" / "textures_mass" / "texturemass", b"\x03UIs\x06\x98`\x01\x00\x19textures_mass/texturemass", "UIs/textures_mass/texturemass"),
     ]
