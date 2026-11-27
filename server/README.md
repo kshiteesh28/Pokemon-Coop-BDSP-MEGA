@@ -4,6 +4,20 @@ The N-player shared-world relay described in §6 of the architecture guide. It's
 
 > **Status:** the server and a mock-player simulator are done and tested. The in-game client (the subsdk2/subsdk3 network thread, Phases 2–3) is **not** in this folder. Until that exists, the server has no game to talk to, so `coop-sim` stands in for players.
 
+## Easy mode: double-click scripts
+
+**Host (Windows):** double-click **`host-server.bat`**.
+- The first time, it asks for your name, a room code and an optional password, saves them in `coop.ini`, and asks Windows once (one "Yes") to let friends through the firewall.
+- After that it builds and starts the server, shows the address friends need (your Tailscale address and your Wi-Fi address), and copies an invite to your clipboard. It also keeps the laptop awake while the window is open.
+
+**Friends:**
+- Windows: double-click **`join.bat`**.
+- Mac: double-click **`join-mac.command`**. The first time, right-click → Open, or run `bash join-mac.command`.
+
+The first time, it asks for the address, room, name and password from the invite. A host's `invite-coop.ini` dropped into the folder also works. It then connects and lists other players as they appear on your map. Close the window to leave.
+
+All settings live in **`coop.ini`**: address, room, name, password. See `coop.ini.example`. The in-game client will read the same file. `coop.ini` and `invite-coop.ini` are git-ignored because they can contain a password.
+
 ## Quick start (local test)
 
 ```sh
