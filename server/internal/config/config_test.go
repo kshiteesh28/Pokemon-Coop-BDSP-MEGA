@@ -35,14 +35,14 @@ func TestLoadClient(t *testing.T) {
 	p := filepath.Join(dir, "coop.ini")
 	os.WriteFile(p, []byte("address=1.2.3.4:4100\nroom=X\nname=N\npassword=pw\n"), 0o644)
 	c, ok, err := LoadClient(p)
-	if !ok || err != nil || c != (Client{"1.2.3.4:4100", "X", "N", "pw"}) {
+	if !ok || err != nil || c != (Client{Address: "1.2.3.4:4100", Room: "X", Name: "N", Password: "pw"}) {
 		t.Fatalf("%+v %v %v", c, ok, err)
 	}
 }
 
 func TestSaveClientRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "coop.ini")
-	want := Client{"100.1.2.3:4100", "AAROH", "Aaroh", "pw"}
+	want := Client{"100.1.2.3:4100", "AAROH", "Aaroh", "pw", `C:\Emu\Ryujinx.exe`, `D:\Games\BD.nsp`}
 	if err := SaveClient(p, want); err != nil {
 		t.Fatal(err)
 	}

@@ -24,6 +24,8 @@ type Client struct {
 	Room     string
 	Name     string
 	Password string
+	Ryujinx  string // path to Ryujinx.exe / Ryujinx.app (used by the app's Play button)
+	Game     string // path to the Brilliant Diamond game file (.nsp/.xci)
 }
 
 // Parse reads key = value lines.
@@ -67,7 +69,7 @@ func LoadClient(path string) (Client, bool, error) {
 	if err != nil {
 		return Client{}, false, fmt.Errorf("%s: %w", path, err)
 	}
-	return Client{Address: m["address"], Room: m["room"], Name: m["name"], Password: m["password"]}, true, nil
+	return Client{Address: m["address"], Room: m["room"], Name: m["name"], Password: m["password"], Ryujinx: m["ryujinx"], Game: m["game"]}, true, nil
 }
 
 // SaveClient writes c to path in the standard coop.ini layout (Windows line
@@ -78,5 +80,10 @@ func SaveClient(path string, c Client) error {
 		"room     = " + c.Room + "\r\n" +
 		"name     = " + c.Name + "\r\n" +
 		"password = " + c.Password + "\r\n"
+	if c.Ryujinx != "" || c.Game != "" {
+		text += "\r\n# used by the app's Play button\r\n" +
+			"ryujinx  = " + c.Ryujinx + "\r\n" +
+			"game     = " + c.Game + "\r\n"
+	}
 	return os.WriteFile(path, []byte(text), 0o600)
 }
