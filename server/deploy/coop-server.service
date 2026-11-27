@@ -1,0 +1,22 @@
+# systemd unit for a Linux VPS.
+#   sudo cp coop-server /usr/local/bin/
+#   sudo cp coop-server.service /etc/systemd/system/
+#   sudo systemctl edit coop-server   # add: [Service] Environment=COOP_PASSWORD=yourpassword
+#   sudo systemctl enable --now coop-server
+#   journalctl -u coop-server -f      # live logs
+[Unit]
+Description=Pokemon-Coop-BDSP co-op server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/coop-server -listen :4100 -max-players 4
+Restart=always
+RestartSec=2
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
