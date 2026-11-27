@@ -39,3 +39,15 @@ func TestLoadClient(t *testing.T) {
 		t.Fatalf("%+v %v %v", c, ok, err)
 	}
 }
+
+func TestSaveClientRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "coop.ini")
+	want := Client{"100.1.2.3:4100", "AAROH", "Aaroh", "pw"}
+	if err := SaveClient(p, want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadClient(p)
+	if !ok || err != nil || got != want {
+		t.Fatalf("%+v %v %v", got, ok, err)
+	}
+}
