@@ -1164,8 +1164,9 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
         scale = target_h / posed_h
         scale = max(0.35, min(1.30, scale))
         # Clamp negative vanilla AABB minY (e.g. Steelix -0.448, Aerodactyl -0.322) to >= 0.0 so
-        # coiled/flying Megas never sink beneath the battleground floor!
-        target_min_y = max(van_min_y, 0.0)
+        # coiled/flying Megas never sink beneath the battleground floor, while respecting hover overrides!
+        hover_min_y = {"pm0382_51_00": 0.72}  # Primal Kyogre hovers ~0.72m above floor in Legends: Z-A
+        target_min_y = hover_min_y.get(spec.za_pack, max(van_min_y, 0.0))
         ty = target_min_y - posed_min_y * scale
         tz = max(-0.40 * van_h, min(0.40 * van_h, -posed_med_z * scale))
 

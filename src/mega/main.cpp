@@ -337,10 +337,39 @@ uint16_t gPlayerPreMegaTokusei = 0;
 // Per-pokeID pre-Mega ability tracking so player & enemy Mega Evolutions never clobber each other.
 uint16_t gPreMegaTokuseiByPokeID[kMaxBattlePokes] = {};
 
-// Transient display context for MessageManager$$GetSimpleMessage during active Mega Evolution.
-int gCurrentEvoSpecies = 0;
-int gCurrentEvoForm = 0;
-uint8_t gCurrentEvoClientID = 0;
+// FIFO display context for MessageManager$$GetSimpleMessage during active Mega Evolution
+// (BattleView renders queued ServerCommands frames after executeMegaEvolution returns).
+struct PendingEvoMsg {
+    int species;
+    int form;
+    uint8_t clientID;
+};
+constexpr size_t kPendingEvoQueueCap = 8;
+PendingEvoMsg gPendingEvoQueue[kPendingEvoQueueCap] = {};
+size_t gPendingEvoHead = 0;
+size_t gPendingEvoTail = 0;
+
+inline void pushPendingEvoMsg(int species, int form, uint8_t clientID) {
+    const size_t nextTail = (gPendingEvoTail + 1) % kPendingEvoQueueCap;
+    if (nextTail == gPendingEvoHead) {
+        gPendingEvoHead = (gPendingEvoHead + 1) % kPendingEvoQueueCap;
+    }
+    gPendingEvoQueue[gPendingEvoTail] = { species, form, clientID };
+    gPendingEvoTail = nextTail;
+}
+
+inline const PendingEvoMsg* peekPendingEvoMsg() {
+    if (gPendingEvoHead == gPendingEvoTail) {
+        return nullptr;
+    }
+    return &gPendingEvoQueue[gPendingEvoHead];
+}
+
+inline void popPendingEvoMsg() {
+    if (gPendingEvoHead != gPendingEvoTail) {
+        gPendingEvoHead = (gPendingEvoHead + 1) % kPendingEvoQueueCap;
+    }
+}
 
 bool gInMegaTokuseiSwap = false;
 
@@ -363,9 +392,8 @@ inline void resetBattleMegaState() {
     }
     gMegaArmed = false;
     gAnyMegaActiveInBattle = false;
-    gCurrentEvoSpecies = 0;
-    gCurrentEvoForm = 0;
-    gCurrentEvoClientID = 0;
+    gPendingEvoHead = 0;
+    gPendingEvoTail = 0;
 }
 
 inline bool isBattleEnded() {
@@ -1253,20 +1281,22 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     if (pokeID < kMaxBattlePokes) {
         gPreMegaTokuseiByPokeID[pokeID] = prevTokusei;
     }
-    if (clientID == 0 && !isPrimalEntry(entry)) {
+    const bool isPrimal = isPrimalEntry(entry);
+    if (clientID == 0 && !isPrimal) {
         gPlayerMegaSpecies = entry->species;
         gPlayerMegaForm = entry->form;
         gPlayerPreMegaTokusei = prevTokusei;
     }
-    gCurrentEvoSpecies = entry->species;
-    gCurrentEvoForm = entry->form;
-    gCurrentEvoClientID = clientID;
+    if (!isPrimal) {
+        pushPendingEvoMsg(entry->species, entry->form, clientID);
+    }
     gAnyMegaActiveInBattle = true;
 
     const uint16_t accessoryId = (clientID == 0) ? ownedMegaAccessoryInBag() : kMegaRing;
     const uint16_t displayAccessory = (accessoryId != 0) ? accessoryId : kMegaRing;
 
-    if (container->fields.m_section_FromEvent_Message != nullptr) {
+    // Primal Reversion skips the Mega Ring reaction line and uses native OmegaForm_01/E_01 directly.
+    if (!isPrimal && container->fields.m_section_FromEvent_Message != nullptr) {
         if (auto* msgDesc = Dpr::Battle::Logic::Section_FromEvent_Message::Description::newInstance();
             msgDesc != nullptr && msgDesc->fields.message != nullptr) {
             msgDesc->fields.pokeID = pokeID;
@@ -1293,9 +1323,15 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
             formDesc->fields.isEnableInCaseOfDead = false;
             formDesc->fields.isDisplayTokuseiWindow = false;
             formDesc->fields.isDisplayChangeEffect = true;
-            formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
-            formDesc->fields.successMessage->AddArg(pokeID);
-            formDesc->fields.successMessage->AddArg(pokeID);
+            if (isPrimal) {
+                const int32_t primalStrId = (clientID == 0) ? BTL_STRID_SET::OmegaForm_01 : BTL_STRID_SET::OmegaForm_E_01;
+                formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, primalStrId);
+                formDesc->fields.successMessage->AddArg(pokeID);
+            } else {
+                formDesc->fields.successMessage->Setup(Dpr::Battle::Logic::BtlStrType::BTL_STRTYPE_SET, BTL_STRID_SET::MegaEvo);
+                formDesc->fields.successMessage->AddArg(pokeID);
+                formDesc->fields.successMessage->AddArg(pokeID);
+            }
 
             system_load_typeinfo(0x2c56);
             if (auto* formResult = Dpr::Battle::Logic::Section_FromEvent_FormChange::Result::newInstance();
@@ -1304,11 +1340,6 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
             }
         }
     }
-
-    // Clear transient message-override context so later unrelated messages are never rewritten.
-    gCurrentEvoSpecies = 0;
-    gCurrentEvoForm = 0;
-    gCurrentEvoClientID = 0;
 
     const uint16_t megaAbility = static_cast<uint16_t>(entry->ability);
     param->fields.m_tokusei = megaAbility;
@@ -1721,17 +1752,12 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                                             System::String::Object* fileName,
                                             System::String::Object* label,
                                             const void* methodInfo) {
-        if (mega::gCurrentEvoForm > 0 && label != nullptr) {
-            if (const auto* md = mega::findMegaByForm(mega::gCurrentEvoSpecies, mega::gCurrentEvoForm); md != nullptr) {
+        if (const auto* pending = mega::peekPendingEvoMsg(); pending != nullptr && label != nullptr) {
+            if (const auto* md = mega::findMegaByForm(pending->species, pending->form); md != nullptr) {
                 char msgBuf[192];
-                const bool isPlayer = (mega::gCurrentEvoClientID == 0);
+                const bool isPlayer = (pending->clientID == 0);
                 if (mega::utf16ContainsAscii(label, "1572") || mega::utf16ContainsAscii(label, "megaevostart")) {
-                    if (mega::isPrimalEntry(md)) {
-                        std::snprintf(msgBuf, sizeof(msgBuf),
-                                      isPlayer ? "%s's Primal Reversion! It reverted to its primal form!"
-                                               : "The opposing %s's Primal Reversion! It reverted to its primal form!",
-                                      md->speciesName);
-                    } else if (md->requiredMoveId > 0 && md->stoneItemId == 0) {
+                    if (md->requiredMoveId > 0 && md->stoneItemId == 0) {
                         std::snprintf(msgBuf, sizeof(msgBuf),
                                       isPlayer ? "Your fervent wish has reached %s!"
                                                : "A fervent wish has reached the opposing %s!",
@@ -1751,17 +1777,11 @@ HOOK_DEFINE_TRAMPOLINE(MessageManager$$GetSimpleMessage) {
                     return System::String::Create(msgBuf);
                 }
                 if (mega::utf16ContainsAscii(label, "1576") || mega::utf16ContainsAscii(label, "megaevo")) {
-                    if (mega::isPrimalEntry(md)) {
-                        std::snprintf(msgBuf, sizeof(msgBuf),
-                                      isPlayer ? "%s reverted to %s!"
-                                               : "The opposing %s reverted to %s!",
-                                      md->speciesName, md->megaName);
-                    } else {
-                        std::snprintf(msgBuf, sizeof(msgBuf),
-                                      isPlayer ? "%s has Mega Evolved into %s!"
-                                               : "The opposing %s has Mega Evolved into %s!",
-                                      md->speciesName, md->megaName);
-                    }
+                    std::snprintf(msgBuf, sizeof(msgBuf),
+                                  isPlayer ? "%s has Mega Evolved into %s!"
+                                           : "The opposing %s has Mega Evolved into %s!",
+                                  md->speciesName, md->megaName);
+                    mega::popPendingEvoMsg();
                     return System::String::Create(msgBuf);
                 }
             }

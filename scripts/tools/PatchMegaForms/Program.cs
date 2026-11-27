@@ -325,8 +325,8 @@ internal static class Program
             foreach (var sheet in sheets)
             {
                 var arr = uiBf[$"{sheet}.Array"].Children;
-                var existingUid = new HashSet<int>(arr.Select(r => r["UniqueID"].AsInt));
-                int added = 0;
+                var byUidSheet = arr.ToDictionary(r => r["UniqueID"].AsInt);
+                int added = 0, fixedVoice = 0;
 
                 foreach (var m in megas)
                 {
@@ -336,18 +336,33 @@ internal static class Program
                     {
                         int sexRare = br["UniqueID"].AsInt % 100;
                         int newUid = m.Species * 10000 + m.Form * 100 + sexRare;
-                        if (existingUid.Contains(newUid)) continue;
+                        if (byUidSheet.TryGetValue(newUid, out var existingRow))
+                        {
+                            if (sheet == "PokemonVoice")
+                            {
+                                var curEv = existingRow["WwiseEvent"].AsString;
+                                var baseEv = br["WwiseEvent"].AsString;
+                                if (!string.IsNullOrEmpty(baseEv) && !baseEv.StartsWith("PLAY_PV_") &&
+                                    (string.IsNullOrEmpty(curEv) || curEv.StartsWith("PLAY_PV_")))
+                                {
+                                    existingRow["WwiseEvent"].AsString = baseEv;
+                                    existingRow["stopEventId"].AsString = br["stopEventId"].AsString;
+                                    fixedVoice++;
+                                }
+                            }
+                            continue;
+                        }
 
                         var nr = CloneField(br);
                         nr["UniqueID"].AsInt = newUid;
                         arr.Add(nr);
-                        existingUid.Add(newUid);
+                        byUidSheet[newUid] = nr;
                         added++;
                     }
                 }
 
                 arr.Sort((a, b) => a["UniqueID"].AsInt.CompareTo(b["UniqueID"].AsInt));
-                Console.WriteLine($"  [UIDatabase.{sheet}] total={arr.Count}, added={added} rows (sorted by UniqueID)");
+                Console.WriteLine($"  [UIDatabase.{sheet}] total={arr.Count}, added={added}, fixedVoice={fixedVoice} rows (sorted by UniqueID)");
             }
 
             uiInfo!.SetNewData(uiBf);

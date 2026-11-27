@@ -217,6 +217,109 @@ static byte[] PackBundleLz4(AssetBundleFile bun, AssetsFile file)
     if (tablesPatched != 7)
         throw new Exception($"Expected 7 item message tables in Message/english, patched {tablesPatched}");
 
+    static AssetTypeValueField CloneField(AssetTypeValueField src)
+    {
+        var clone = new AssetTypeValueField
+        {
+            TemplateField = src.TemplateField,
+            Value = src.Value != null
+                ? new AssetTypeValue(
+                    src.Value.ValueType,
+                    src.Value.ValueType == AssetValueType.ByteArray && src.Value.AsByteArray != null
+                        ? (byte[])src.Value.AsByteArray.Clone()
+                        : src.Value.AsObject)
+                : null,
+            Children = new List<AssetTypeValueField>(src.Children.Count)
+        };
+        foreach (var ch in src.Children)
+            clone.Children.Add(CloneField(ch));
+        return clone;
+    }
+
+    int btlStdAdded = 0, btlSetAdded = 0;
+    foreach (var mb in inst.file.GetAssetsOfType(AssetClassID.MonoBehaviour))
+    {
+        var bf = am.GetBaseField(inst, mb);
+        var nm = bf["m_Name"].AsString;
+        if (nm == "english_ss_btl_std")
+        {
+            var arr = bf["labelDataArray.Array"].Children;
+            var byName = arr.ToDictionary(r => r["labelName"].AsString);
+            var tmpl = byName["BTL_STRID_STD_RainStormStart"];
+            int nextLabelIdx = arr.Max(r => r["labelIndex"].AsInt) + 1;
+
+            var weatherMsgs = new (string Label, string Text)[]
+            {
+                ("BTL_STRID_STD_DayStart",               "The sunlight turned extremely harsh!"),
+                ("BTL_STRID_STD_DayEnd",                 "The harsh sunlight faded."),
+                ("BTL_STRID_STD_DayFail",                "The Water-type attack evaporated in the harsh sunlight!"),
+                ("BTL_STRID_STD_DayFail_Weather",        "The extremely harsh sunlight was not lessened at all!"),
+                ("BTL_STRID_STD_TurbulenceStart",        "Mysterious strong winds are protecting Flying-type Pokémon!"),
+                ("BTL_STRID_STD_TurbulenceEnd",          "The mysterious strong winds have dissipated!"),
+                ("BTL_STRID_STD_TurbulenceFail",         "The mysterious strong winds weakened the attack!"),
+                ("BTL_STRID_STD_TurbulenceFail_Weather", "The mysterious strong winds blow on regardless!"),
+            };
+
+            foreach (var (label, text) in weatherMsgs)
+            {
+                if (byName.TryGetValue(label, out var existing))
+                {
+                    var w = existing["wordDataArray.Array"].Children;
+                    if (w.Count > 0) w[0]["str"].AsString = text;
+                    for (int k = 1; k < w.Count; k++) w[k]["str"].AsString = "";
+                    continue;
+                }
+                var row = CloneField(tmpl);
+                row["labelIndex"].AsInt = nextLabelIdx++;
+                row["arrayIndex"].AsInt = arr.Count;
+                row["labelName"].AsString = label;
+                var words = row["wordDataArray.Array"].Children;
+                words[0]["str"].AsString = text;
+                for (int k = 1; k < words.Count; k++) words[k]["str"].AsString = "";
+                arr.Add(row);
+                byName[label] = row;
+                btlStdAdded++;
+            }
+            mb.SetNewData(bf);
+        }
+        else if (nm == "english_ss_btl_set")
+        {
+            var arr = bf["labelDataArray.Array"].Children;
+            var byName = arr.ToDictionary(r => r["labelName"].AsString);
+            var tmplSelf = byName["BTL_STRID_SET_MegaEvo"];
+            var tmplEnemy = byName["BTL_STRID_SET_MegaEvo_E"];
+            int nextLabelIdx = arr.Max(r => r["labelIndex"].AsInt) + 1;
+
+            var primalMsgs = new (string Label, AssetTypeValueField Tmpl, string Text)[]
+            {
+                ("BTL_STRID_SET_OmegaForm_01",   tmplSelf,  " is undergoing Primal Reversion!"),
+                ("BTL_STRID_SET_OmegaForm_Y_01", tmplSelf,  " is undergoing Primal Reversion!"),
+                ("BTL_STRID_SET_OmegaForm_E_01", tmplEnemy, " is undergoing Primal Reversion!"),
+            };
+
+            foreach (var (label, tmpl, text) in primalMsgs)
+            {
+                if (byName.TryGetValue(label, out var existing))
+                {
+                    var w = existing["wordDataArray.Array"].Children;
+                    if (w.Count >= 2) w[1]["str"].AsString = text;
+                    continue;
+                }
+                var row = CloneField(tmpl);
+                row["labelIndex"].AsInt = nextLabelIdx++;
+                row["arrayIndex"].AsInt = arr.Count;
+                row["labelName"].AsString = label;
+                var words = row["wordDataArray.Array"].Children;
+                if (words.Count >= 2) words[1]["str"].AsString = text;
+                arr.Add(row);
+                byName[label] = row;
+                btlSetAdded++;
+            }
+            mb.SetNewData(bf);
+        }
+    }
+    Console.WriteLine($"Patched battle messages in Message/english: +{btlStdAdded} btl_std weather rows, +{btlSetAdded} btl_set Primal rows.");
+
     var packed = PackBundleLz4(bun.file, inst.file);
     foreach (var p in engOuts)
     {
@@ -233,6 +336,26 @@ static byte[] PackBundleLz4(AssetBundleFile bun, AssetsFile file)
     {
         var bf = vam.GetBaseField(vinst, mb);
         var nm = bf["m_Name"].AsString;
+        if (nm == "english_ss_btl_std")
+        {
+            var byName = bf["labelDataArray.Array"].Children.ToDictionary(r => r["labelName"].AsString);
+            foreach (var req in new[] { "BTL_STRID_STD_DayStart", "BTL_STRID_STD_DayEnd", "BTL_STRID_STD_DayFail", "BTL_STRID_STD_TurbulenceStart" })
+            {
+                if (!byName.ContainsKey(req)) throw new Exception($"Missing {req} in english_ss_btl_std!");
+                var txt = string.Concat(byName[req]["wordDataArray.Array"].Children.Select(w => w["str"].AsString));
+                Console.WriteLine($"  Verified {nm}[{req}] = '{txt}'");
+            }
+        }
+        if (nm == "english_ss_btl_set")
+        {
+            var byName = bf["labelDataArray.Array"].Children.ToDictionary(r => r["labelName"].AsString);
+            foreach (var req in new[] { "BTL_STRID_SET_OmegaForm_01", "BTL_STRID_SET_OmegaForm_E_01" })
+            {
+                if (!byName.ContainsKey(req)) throw new Exception($"Missing {req} in english_ss_btl_set!");
+                var txt = string.Concat(byName[req]["wordDataArray.Array"].Children.Select(w => w["str"].AsString));
+                Console.WriteLine($"  Verified {nm}[{req}] = '{txt}'");
+            }
+        }
         if (nm != "english_ss_itemname" && nm != "english_ss_iteminfo") continue;
         var arr = bf["labelDataArray.Array"].Children;
         foreach (var checkId in new[] { 622, 837, 859, 868, 1073, 1078 })
@@ -243,5 +366,5 @@ static byte[] PackBundleLz4(AssetBundleFile bun, AssetsFile file)
             Console.WriteLine($"  Verified {nm}[{checkId}] = '{txt}'");
         }
     }
-    Console.WriteLine("ROUND-TRIP VERIFIED: All 92 Mega Stones + 3 Key Items named & described in Message/english!");
+    Console.WriteLine("ROUND-TRIP VERIFIED: All 92 Mega Stones + 3 Key Items + Primal Reversion & weather messages in Message/english!");
 }
