@@ -439,7 +439,9 @@ function renderGame(g) {
   fill($("checks"), g.checks.map(c => h("div", { class: "check" + (c.ok ? " ok" : c.id === "mega" ? " opt" : "") },
     h("div", { class: "mark" }, c.ok ? "✓" : c.id === "mega" ? "!" : "✕"),
     h("div", { style: "min-width:0" }, h("div", { class: "l" }, c.label), h("div", { class: "d" }, c.detail)),
-    pickable[c.id] ? h("button", { class: "btn small ghost", onclick: () => act("/api/game/pick", { what: pickable[c.id] }) }, c.ok ? "Change" : "Browse") : null)));
+    pickable[c.id] ? h("div", { class: "row", style: "margin-left:auto; gap:6px" },
+      h("button", { class: "btn small ghost", onclick: () => browse(pickable[c.id]) }, c.ok ? "Change" : "Browse"),
+      h("button", { class: "btn small ghost", title: "Paste the full path instead", onclick: () => pastePath(pickable[c.id]) }, "Paste path")) : null)));
   $("play-btn").disabled = !g.ready || busy.play;
   $("play-sub").textContent = g.ready ? "Starts Ryujinx with your mods." : "Fix the ✕ items to play.";
 }
@@ -506,6 +508,17 @@ $("play-btn").onclick = async () => {
   await act("/api/game/play", {}, "Starting the game… enjoy!");
   setTimeout(() => { busy.play = false; $("play-btn").textContent = "▶ PLAY"; poll(); }, 4000);
 };
+async function browse(what) {
+  toast("Opening the file picker… (check your taskbar if you don't see it)", true);
+  await act("/api/game/pick", { what });
+}
+async function pastePath(what) {
+  const hint = what === "game"
+    ? "Paste the full path to your Brilliant Diamond .nsp/.xci file.\nTip: in File Explorer, Shift + right-click the file → Copy as path."
+    : "Paste the full path to Ryujinx.exe.\nTip: in File Explorer, Shift + right-click Ryujinx.exe → Copy as path.";
+  const path = prompt(hint, "");
+  if (path) await act("/api/game/path", { what, path }, "Saved");
+}
 $("detect").onclick = async (e) => {
   e.preventDefault();
   try { const r = await api("/api/game/detect", {}); toast(r.found ? "Found " + r.found + " item" + (r.found > 1 ? "s" : "") : "Couldn't find them, use Browse instead", !!r.found); }
