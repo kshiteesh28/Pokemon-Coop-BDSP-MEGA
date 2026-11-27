@@ -262,7 +262,12 @@ func TestBattleTurnTimeoutAndDrop(t *testing.T) {
 	a, _ := joinID(t, addr, "T", "Ash", 1)
 	b, ackB := joinID(t, addr, "T", "Brock", 2)
 	c, _ := joinID(t, addr, "T", "Misty", 3)
+	// Elite Four is duo-only too.
 	a.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleEliteFour, Target: 1, MaxPlayers: 3}).Marshal())
+	if code := battleErr(t, a); code != protocol.BattleErrBadRequest {
+		t.Fatalf("3-player Elite Four should be refused, got %d", code)
+	}
+	a.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleChampion, Target: 1, MaxPlayers: 3}).Marshal())
 	l := lobbyOf(t, a)
 	for _, cl := range []*mockclient.Client{b, c} {
 		cl.Send(protocol.MsgBattleJoin, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())

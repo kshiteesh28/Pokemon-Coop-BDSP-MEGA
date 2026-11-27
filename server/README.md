@@ -83,7 +83,7 @@ Each room code has its own registry, saved in the data file so it survives resta
 
 ## Battle lobbies: team gyms, Elite Four, Champion (0x30–0x3C)
 
-**Gyms are solo or duo** (max 2 players). Elite Four, Champion and free battles allow up to 4. The server doesn't simulate battles. It keeps every game in **lockstep**: all games get the same RNG seed and slot order, every turn each game sends its player's chosen action, and the server relays all of them together once everyone has acted.
+**Gyms and the Elite Four are solo or duo** (max 2 players). The Champion and free battles allow up to 4. The server doesn't simulate battles. It keeps every game in **lockstep**: all games get the same RNG seed and slot order, every turn each game sends its player's chosen action, and the server relays all of them together once everyone has acted.
 
 | Type | Name | Dir | Payload |
 |---|---|---|---|
@@ -97,7 +97,7 @@ Each room code has its own registry, saved in the data file so it survives resta
 | 0x38 | BATTLE_TURN | S→C | lobby_id u16, turn u16, count u8, count×(player_id u16, len u16, data). **Empty data = that player timed out; use a default action** |
 | 0x39 | BATTLE_RESULT | C→S | lobby_id u16, outcome u8 (0 win, 1 loss). Host only |
 | 0x3A | BATTLE_END | S→C | lobby_id u16, outcome u8, count u8, count×player_id u16 |
-| 0x3B | BATTLE_ERROR | S→C | lobby_id u16, code u8: 1 no lobby, 2 full, 3 other room, 4 already in a lobby, 5 not host, 6 not all ready, 7 already started, 8 wrong turn, 9 not a member, 10 bad request (e.g. 3-player gym) |
+| 0x3B | BATTLE_ERROR | S→C | lobby_id u16, code u8: 1 no lobby, 2 full, 3 other room, 4 already in a lobby, 5 not host, 6 not all ready, 7 already started, 8 wrong turn, 9 not a member, 10 bad request (e.g. 3-player gym or Elite Four) |
 | 0x3C | PROGRESS | S→C | count u8, count×(kind u8, target u16). Sent after HELLO and whenever you earn a new win |
 
 **Rules:**

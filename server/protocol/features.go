@@ -85,11 +85,11 @@ const (
 // MaxBattleActionData bounds one player's per-turn action blob.
 const MaxBattleActionData = 512
 
-// MaxBattlePlayers is the largest lobby the server allows (Elite Four, Champion, free).
+// MaxBattlePlayers is the largest lobby the server allows (Champion, free battles).
 const MaxBattlePlayers = 4
 
-// MaxGymPlayers: gym battles are solo or duo only.
-const MaxGymPlayers = 2
+// MaxDuoPlayers: gym and Elite Four battles are solo or duo only.
+const MaxDuoPlayers = 2
 
 type LegendReserve struct{ Species uint16 }
 
