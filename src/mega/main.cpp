@@ -323,6 +323,8 @@ constexpr uint8_t kBtlActionFight = 1; // BTL_ACTION_FIGHT
 std::atomic<bool> gPostInitHooksInstalled{false};
 std::atomic<bool> gItemTablePatched{false};
 std::atomic<bool> gWeatherHookInstalled{false};
+uint8_t gTargetBtlWeather = 0;
+bool gForceWeatherReload = false;
 void installBattleWeatherHookIfReady();
 bool gIsTrainerBattle = false;
 bool gMegaBattleAllowed = true;
@@ -396,6 +398,8 @@ inline void resetBattleMegaState() {
     gAnyMegaActiveInBattle = false;
     gPendingEvoHead = 0;
     gPendingEvoTail = 0;
+    gTargetBtlWeather = 0;
+    gForceWeatherReload = false;
 }
 
 inline bool isBattleEnded() {
@@ -1843,21 +1847,60 @@ HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Label) {
     }
 };
 
-HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$BtlWeatherToBtlvWeather_Static) {
-    static int32_t Callback(uint8_t weather, const void* methodInfo) {
-        if (weather >= 5 && weather <= 8) {
-            return static_cast<int32_t>(weather);
+// Primal / Mega weather visual pipeline (Primordial Sea = 5, Desolate Land = 6, Delta Stream = 7).
+// Routes through vanilla-safe BtlvWeather slots (RAIN=2, SHINE=1, SAND=4) so EnvironmentController
+// and LoadWeatherParam never hit BTLV_WEATHER_MAX (6), forces a prefab reload across Drizzle->Storm
+// and Drought->Day transitions, and swaps the particle prefab name in LoadWeatherEffect.
+HOOK_DEFINE_TRAMPOLINE(BattleViewSystem$$CMD_ChangeWheather) {
+    static void Callback(Dpr::Battle::View::Systems::BattleViewSystem::Object* __this,
+                         uint8_t weather,
+                         const void* methodInfo) {
+        const uint8_t prevTarget = mega::gTargetBtlWeather;
+        mega::gTargetBtlWeather = weather;
+        uint8_t viewWeather = weather;
+        if (weather == 5) {          // BTL_WEATHER_STORM (Primordial Sea)
+            mega::gForceWeatherReload = true;
+            viewWeather = 2;         // BTL_WEATHER_RAIN
+        } else if (weather == 6) {   // BTL_WEATHER_DAY (Desolate Land)
+            mega::gForceWeatherReload = true;
+            viewWeather = 1;         // BTL_WEATHER_SHINE
+        } else if (weather == 7) {   // BTL_WEATHER_TURBULENCE (Delta Stream)
+            mega::gForceWeatherReload = true;
+            viewWeather = 4;         // BTL_WEATHER_SAND
+        } else if (prevTarget >= 5 && prevTarget <= 7) {
+            // Ensure switching from Primal weather back to normal Rain/Sun/Sand reloads the vanilla prefab.
+            mega::gForceWeatherReload = true;
         }
-        return Orig(weather, methodInfo);
+        Orig(__this, viewWeather, methodInfo);
     }
 };
 
-HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$BtlWeatherToBtlvWeather_Inst) {
-    static int32_t Callback(void* __this, uint8_t weather, const void* methodInfo) {
-        if (weather >= 5 && weather <= 8) {
-            return static_cast<int32_t>(weather);
+HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$CheckAlreadyChanged) {
+    static bool Callback(void* __this, const void* methodInfo) {
+        if (mega::gForceWeatherReload) {
+            mega::gForceWeatherReload = false;
+            return false;
         }
-        return Orig(__this, weather, methodInfo);
+        return Orig(__this, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$LoadWeatherEffect) {
+    static void* Callback(void* __this,
+                          System::String::Object* file,
+                          void* setter,
+                          int32_t drawType,
+                          const void* methodInfo) {
+        if (file != nullptr && file->fields.m_stringLength > 0) {
+            if (mega::gTargetBtlWeather == 5) {
+                file = System::String::Create("et005_heavyrain01");
+            } else if (mega::gTargetBtlWeather == 6) {
+                file = System::String::Create("et006_extremesun01");
+            } else if (mega::gTargetBtlWeather == 7) {
+                file = System::String::Create("et007_strongwinds01");
+            }
+        }
+        return Orig(__this, file, setter, drawType, methodInfo);
     }
 };
 
@@ -1877,29 +1920,38 @@ void installBattleWeatherHookIfReady() {
     }
     auto* viewSys = core->fields._ViewSystem_k__BackingField;
     auto* weatherObj = reinterpret_cast<Il2CppObject*>(viewSys->fields.m_iPtrWeatherSystem);
-    if (weatherObj == nullptr || weatherObj->klass == nullptr || weatherObj->klass->_1.methods == nullptr) {
+    if (viewSys->klass == nullptr ||
+        weatherObj == nullptr || weatherObj->klass == nullptr || weatherObj->klass->_1.methods == nullptr) {
         return;
     }
     if (gWeatherHookInstalled.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
+
+    // 1. Virtual BattleViewSystem::CMD_ChangeWheather (vtable slot 245, never inlined).
+    if (viewSys->klass->vtable._245_CMD_ChangeWheather.methodPtr != nullptr) {
+        BattleViewSystem$$CMD_ChangeWheather::InstallAtPtr(
+            reinterpret_cast<uintptr_t>(viewSys->klass->vtable._245_CMD_ChangeWheather.methodPtr));
+    }
+
+    // 2 & 3. BattleWeatherSystem::CheckAlreadyChanged and LoadWeatherEffect (resolved dynamically).
     auto* klass = weatherObj->klass;
     auto** methods = reinterpret_cast<const MethodInfo**>(klass->_1.methods);
-    for (uint16_t i = 0; i < klass->_2.method_count; ++i) {
+    bool hookedCheck = false;
+    bool hookedLoad = false;
+    for (uint16_t i = 0; i < klass->_2.method_count && !(hookedCheck && hookedLoad); ++i) {
         const MethodInfo* mi = methods[i];
         if (mi == nullptr || mi->name == nullptr || mi->methodPointer == nullptr) {
             continue;
         }
-        if (std::strcmp(mi->name, "BtlWeatherToBtlvWeather") == 0) {
-            constexpr uint16_t kMethodAttrStatic = 0x0010U;
-            if ((mi->flags & kMethodAttrStatic) != 0) {
-                BattleWeatherSystem$$BtlWeatherToBtlvWeather_Static::InstallAtPtr(
-                    reinterpret_cast<uintptr_t>(mi->methodPointer));
-            } else {
-                BattleWeatherSystem$$BtlWeatherToBtlvWeather_Inst::InstallAtPtr(
-                    reinterpret_cast<uintptr_t>(mi->methodPointer));
-            }
-            break;
+        if (!hookedCheck && std::strcmp(mi->name, "CheckAlreadyChanged") == 0) {
+            BattleWeatherSystem$$CheckAlreadyChanged::InstallAtPtr(
+                reinterpret_cast<uintptr_t>(mi->methodPointer));
+            hookedCheck = true;
+        } else if (!hookedLoad && std::strcmp(mi->name, "LoadWeatherEffect") == 0) {
+            BattleWeatherSystem$$LoadWeatherEffect::InstallAtPtr(
+                reinterpret_cast<uintptr_t>(mi->methodPointer));
+            hookedLoad = true;
         }
     }
 }
