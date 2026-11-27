@@ -322,6 +322,8 @@ constexpr uint8_t kBtlActionFight = 1; // BTL_ACTION_FIGHT
 
 std::atomic<bool> gPostInitHooksInstalled{false};
 std::atomic<bool> gItemTablePatched{false};
+std::atomic<bool> gWeatherHookInstalled{false};
+void installBattleWeatherHookIfReady();
 bool gIsTrainerBattle = false;
 bool gMegaBattleAllowed = true;
 bool gClientMegaUsed[kMaxBattleClients] = {false, false, false, false};
@@ -1256,6 +1258,7 @@ bool executeMegaEvolution(Dpr::Battle::Logic::SectionContainer::Object* containe
     if (container == nullptr || pokeAction == nullptr) {
         return false;
     }
+    installBattleWeatherHookIfReady();
 
     system_load_typeinfo(0x8910);
     system_load_typeinfo(0x2c99);
@@ -1840,12 +1843,75 @@ HOOK_DEFINE_TRAMPOLINE(UIText$$SetupMessage_Label) {
     }
 };
 
+HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$BtlWeatherToBtlvWeather_Static) {
+    static int32_t Callback(uint8_t weather, const void* methodInfo) {
+        if (weather >= 5 && weather <= 8) {
+            return static_cast<int32_t>(weather);
+        }
+        return Orig(weather, methodInfo);
+    }
+};
+
+HOOK_DEFINE_TRAMPOLINE(BattleWeatherSystem$$BtlWeatherToBtlvWeather_Inst) {
+    static int32_t Callback(void* __this, uint8_t weather, const void* methodInfo) {
+        if (weather >= 5 && weather <= 8) {
+            return static_cast<int32_t>(weather);
+        }
+        return Orig(__this, weather, methodInfo);
+    }
+};
+
+namespace mega {
+void installBattleWeatherHookIfReady() {
+    if (gWeatherHookInstalled.load(std::memory_order_acquire)) {
+        return;
+    }
+    auto* bvCls = Dpr::Battle::View::BattleViewCore::getClass();
+    if (bvCls == nullptr) {
+        return;
+    }
+    bvCls->initIfNeeded();
+    auto* core = Dpr::Battle::View::BattleViewCore::get_Instance();
+    if (core == nullptr || core->fields._ViewSystem_k__BackingField == nullptr) {
+        return;
+    }
+    auto* viewSys = core->fields._ViewSystem_k__BackingField;
+    auto* weatherObj = reinterpret_cast<Il2CppObject*>(viewSys->fields.m_iPtrWeatherSystem);
+    if (weatherObj == nullptr || weatherObj->klass == nullptr || weatherObj->klass->_1.methods == nullptr) {
+        return;
+    }
+    if (gWeatherHookInstalled.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    auto* klass = weatherObj->klass;
+    auto** methods = reinterpret_cast<const MethodInfo**>(klass->_1.methods);
+    for (uint16_t i = 0; i < klass->_2.method_count; ++i) {
+        const MethodInfo* mi = methods[i];
+        if (mi == nullptr || mi->name == nullptr || mi->methodPointer == nullptr) {
+            continue;
+        }
+        if (std::strcmp(mi->name, "BtlWeatherToBtlvWeather") == 0) {
+            constexpr uint16_t kMethodAttrStatic = 0x0010U;
+            if ((mi->flags & kMethodAttrStatic) != 0) {
+                BattleWeatherSystem$$BtlWeatherToBtlvWeather_Static::InstallAtPtr(
+                    reinterpret_cast<uintptr_t>(mi->methodPointer));
+            } else {
+                BattleWeatherSystem$$BtlWeatherToBtlvWeather_Inst::InstallAtPtr(
+                    reinterpret_cast<uintptr_t>(mi->methodPointer));
+            }
+            break;
+        }
+    }
+}
+} // namespace mega
+
 HOOK_DEFINE_TRAMPOLINE(BUIWazaList$$Initialize) {
     static void Callback(Dpr::Battle::View::UI::BUIWazaList::Object* __this,
                          Dpr::Battle::Logic::BTL_POKEPARAM::Object* bpp,
                          uint8_t pokeIndex,
                          Dpr::Battle::Logic::BTL_ACTION_PARAM_OBJ::Object* dest,
                          const void* methodInfo) {
+        mega::installBattleWeatherHookIfReady();
         const bool eligible = mega::targetMegaEntry(bpp) != nullptr;
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !eligible);
 
