@@ -221,6 +221,10 @@
     <section class="card">
       <h2><span class="step gold">2</span> Play <span class="right"><a href="#" id="detect" style="color:var(--blue)">Find automatically</a></span></h2>
       <div class="checks" id="checks"></div>
+      <div id="coop-status" class="hidden" style="margin-bottom:12px; padding:10px 12px; border-radius:10px; background:#0f1722; border:1px solid var(--line)">
+        <div class="row"><span class="dot" id="coop-dot"></span><b id="coop-title" style="font-size:13px"></b></div>
+        <pre id="coop-lines" style="margin:8px 0 0; white-space:pre-wrap; font-family:Consolas,ui-monospace,monospace; font-size:11.5px; color:var(--muted)"></pre>
+      </div>
       <button class="btn play big" id="play-btn">▶ PLAY</button>
       <div class="row" style="margin-top:10px; justify-content: space-between">
         <span class="sub" id="play-sub"></span>
@@ -436,14 +440,28 @@ function renderChat(join) {
 
 function renderGame(g) {
   const pickable = { ryujinx: "ryujinx", game: "game" };
-  fill($("checks"), g.checks.map(c => h("div", { class: "check" + (c.ok ? " ok" : c.id === "mega" ? " opt" : "") },
-    h("div", { class: "mark" }, c.ok ? "✓" : c.id === "mega" ? "!" : "✕"),
+  const optional = (id) => id === "mega" || id === "coop";
+  fill($("checks"), g.checks.map(c => h("div", { class: "check" + (c.ok ? " ok" : optional(c.id) ? " opt" : "") },
+    h("div", { class: "mark" }, c.ok ? "✓" : optional(c.id) ? "!" : "✕"),
     h("div", { style: "min-width:0" }, h("div", { class: "l" }, c.label), h("div", { class: "d" }, c.detail)),
     pickable[c.id] ? h("div", { class: "row", style: "margin-left:auto; gap:6px" },
       h("button", { class: "btn small ghost", onclick: () => browse(pickable[c.id]) }, c.ok ? "Change" : "Browse"),
       h("button", { class: "btn small ghost", title: "Paste the full path instead", onclick: () => pastePath(pickable[c.id]) }, "Paste path")) : null)));
+  renderCoopStatus(g);
   $("play-btn").disabled = !g.ready || busy.play;
   $("play-sub").textContent = g.ready ? "Starts Ryujinx with your mods." : "Fix the ✕ items to play.";
+}
+
+function renderCoopStatus(g) {
+  const box = $("coop-status");
+  if (!g.coop_status) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const lines = g.coop_status.split("\n");
+  const state = (lines.find(l => l.startsWith("state:")) || "").replace("state:", "").trim();
+  const live = g.coop_age_sec >= 0 && g.coop_age_sec < 10;
+  $("coop-dot").className = "dot " + (live && state === "connected" ? "on" : live ? "warn" : "");
+  $("coop-title").textContent = live ? "In-game co-op: " + state : "In-game co-op: game not running (last update " + fmtTime(g.coop_age_sec) + " ago)";
+  $("coop-lines").textContent = lines.filter(l => !l.startsWith("state:")).join("\n");
 }
 
 function renderLegends(s) {
