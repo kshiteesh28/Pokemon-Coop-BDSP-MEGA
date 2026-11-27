@@ -380,17 +380,4 @@ func TestRoomChat(t *testing.T) {
 	if _, err := other.WaitFor(protocol.MsgChat, 300*time.Millisecond); err == nil {
 		t.Fatal("chat leaked to another room")
 	}
-	// Flooding: after the burst, the sender gets a warning (PlayerID 0) instead.
-	for i := 0; i < 10; i++ {
-		a.Send(protocol.MsgChat, (&protocol.ChatSend{Text: "spam"}).Marshal())
-	}
-	warned := false
-	for i := 0; i < 10 && !warned; i++ {
-		var m protocol.ChatMessage
-		recv(t, a, protocol.MsgChat, &m)
-		warned = m.PlayerID == 0
-	}
-	if !warned {
-		t.Fatal("no rate-limit warning")
-	}
 }

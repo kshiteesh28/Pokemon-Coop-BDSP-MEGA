@@ -497,10 +497,6 @@ func (s *Server) onChat(c *client, p []byte, now time.Time) {
 	if text == "" {
 		return
 	}
-	if !c.chat.take(now) {
-		s.send(c, protocol.MsgChat, (&protocol.ChatMessage{Name: "", Text: "You're sending messages too fast."}).Marshal())
-		return
-	}
 	out := (&protocol.ChatMessage{PlayerID: c.pid, Name: c.app.Name, Text: text}).Marshal()
 	for _, peer := range c.room.players {
 		s.send(peer, protocol.MsgChat, out)

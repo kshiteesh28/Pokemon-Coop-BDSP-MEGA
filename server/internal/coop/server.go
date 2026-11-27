@@ -77,8 +77,6 @@ const (
 	rateBurst    = 120
 	eventPerSec  = 10 // COOP_EVENTs/s per client
 	eventBurst   = 20
-	chatPerSec   = 1 // chat messages/s per client (sustained)
-	chatBurst    = 5
 )
 
 type Server struct {
@@ -140,7 +138,6 @@ type client struct {
 	lastSeen time.Time
 	pkts     bucket
 	evts     bucket
-	chat     bucket
 	dropped  int
 
 	room     *room
@@ -217,7 +214,6 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			conn: conn, addr: conn.RemoteAddr().String(), out: make(chan []byte, outQueue), lastSeen: now,
 			pkts: bucket{tokens: rateBurst, rate: ratePerSec, burst: rateBurst, last: now},
 			evts: bucket{tokens: eventBurst, rate: eventPerSec, burst: eventBurst, last: now},
-			chat: bucket{tokens: chatBurst, rate: chatPerSec, burst: chatBurst, last: now},
 		}
 		go s.writeLoop(c)
 		select {
