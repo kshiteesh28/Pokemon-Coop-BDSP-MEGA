@@ -106,3 +106,4 @@ func runningRyujinx() string {
 	return strings.TrimSpace(string(out))
 }
 
+func openFolder(path string) error { return exec.Command("explorer", path).Start() }
