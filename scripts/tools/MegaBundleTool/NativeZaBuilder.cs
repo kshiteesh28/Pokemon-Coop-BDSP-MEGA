@@ -93,7 +93,7 @@ internal static partial class Program
         var jSubs = meshDoc.GetProperty("submeshes");
         int vCount = jVerts.GetArrayLength();
 
-        const int stride0 = 48;
+        const int stride0 = 52; // Pos(12) + Norm(12) + Tang(16) + Color(4) + UV0(8)
         const int stride1 = 32;
         int stream1Off = Align16(vCount * stride0);
         var vData = new byte[stream1Off + vCount * stride1];
@@ -111,19 +111,28 @@ internal static partial class Program
             if (vy < minY) minY = vy; if (vy > maxY) maxY = vy;
             if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
 
+            // Compute valid orthonormal tangent T = normalize(cross(up, N)) so TBN is never degenerate
+            var nVec = new Vector3(nx, ny, nz);
+            if (nVec.LengthSquared() < 1e-8f) nVec = Vector3.UnitY;
+            else nVec = Vector3.Normalize(nVec);
+            var up = MathF.Abs(nVec.Y) < 0.99f ? Vector3.UnitY : Vector3.UnitX;
+            var tVec = Vector3.Normalize(Vector3.Cross(up, nVec));
+
             int o0 = v * stride0;
             Array.Copy(BitConverter.GetBytes(vx), 0, vData, o0 + 0, 4);
             Array.Copy(BitConverter.GetBytes(vy), 0, vData, o0 + 4, 4);
             Array.Copy(BitConverter.GetBytes(vz), 0, vData, o0 + 8, 4);
-            Array.Copy(BitConverter.GetBytes(nx), 0, vData, o0 + 12, 4);
-            Array.Copy(BitConverter.GetBytes(ny), 0, vData, o0 + 16, 4);
-            Array.Copy(BitConverter.GetBytes(nz), 0, vData, o0 + 20, 4);
-            Array.Copy(BitConverter.GetBytes(1f), 0, vData, o0 + 24, 4);
-            Array.Copy(BitConverter.GetBytes(0f), 0, vData, o0 + 28, 4);
-            Array.Copy(BitConverter.GetBytes(0f), 0, vData, o0 + 32, 4);
+            Array.Copy(BitConverter.GetBytes(nVec.X), 0, vData, o0 + 12, 4);
+            Array.Copy(BitConverter.GetBytes(nVec.Y), 0, vData, o0 + 16, 4);
+            Array.Copy(BitConverter.GetBytes(nVec.Z), 0, vData, o0 + 20, 4);
+            Array.Copy(BitConverter.GetBytes(tVec.X), 0, vData, o0 + 24, 4);
+            Array.Copy(BitConverter.GetBytes(tVec.Y), 0, vData, o0 + 28, 4);
+            Array.Copy(BitConverter.GetBytes(tVec.Z), 0, vData, o0 + 32, 4);
             Array.Copy(BitConverter.GetBytes(1f), 0, vData, o0 + 36, 4);
-            Array.Copy(BitConverter.GetBytes(u), 0, vData, o0 + 40, 4);
-            Array.Copy(BitConverter.GetBytes(uvY), 0, vData, o0 + 44, 4);
+            // Ch[03] Vertex Color UNorm8x4 = (255, 255, 255, 255) matching vanilla BDSP full brightness/rim
+            vData[o0 + 40] = 255; vData[o0 + 41] = 255; vData[o0 + 42] = 255; vData[o0 + 43] = 255;
+            Array.Copy(BitConverter.GetBytes(u), 0, vData, o0 + 44, 4);
+            Array.Copy(BitConverter.GetBytes(uvY), 0, vData, o0 + 48, 4);
 
             int o1 = stream1Off + v * stride1;
             for (int k = 0; k < 4; k++)
@@ -471,6 +480,43 @@ internal static partial class Program
             f.Metadata.AddAssetInfo(ambInfo);
         }
 
+        // Inject 4x4 Neutral Tangent-Space Normal Map RGBA(128,128,255,128) Linear so UnpackNormal yields exact (0,0,+1)
+        // under BOTH RGB and DXT5nm/ASTC AG unpacking (prevents null fallback from rotating normals 90 deg and killing rim/specular!)
+        long neutralNorPid = nextPid++;
+        {
+            var norBytes = new byte[4 * 4 * 4];
+            for (int p = 0; p < norBytes.Length; p += 4)
+            {
+                norBytes[p + 0] = 128; // R = 0.5
+                norBytes[p + 1] = 128; // G = 0.5
+                norBytes[p + 2] = 255; // B = 1.0
+                norBytes[p + 3] = 128; // A = 0.5
+            }
+            var norBf = am.GetBaseField(texTemplateInst, vanTexTemplateInfo);
+            norBf["m_Name"].AsString = $"{formId}_NeutralNor";
+            norBf["m_ForcedFallbackFormat"].AsInt = 4;
+            norBf["m_Width"].AsInt = 4;
+            norBf["m_Height"].AsInt = 4;
+            norBf["m_CompleteImageSize"].AsUInt = (uint)norBytes.Length;
+            norBf["m_TextureFormat"].AsInt = 4;
+            norBf["m_MipCount"].AsInt = 1;
+            norBf["m_IsReadable"].AsBool = false;
+            norBf["m_ImageCount"].AsInt = 1;
+            norBf["m_TextureDimension"].AsInt = 2;
+            norBf["m_ColorSpace"].AsInt = 0; // Linear
+            norBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
+            norBf["m_TextureSettings.m_WrapU"].AsInt = 0;
+            norBf["m_TextureSettings.m_WrapV"].AsInt = 0;
+            norBf["m_TextureSettings.m_WrapW"].AsInt = 0;
+            norBf["m_StreamData.offset"].AsULong = 0;
+            norBf["m_StreamData.size"].AsUInt = 0;
+            norBf["m_StreamData.path"].AsString = "";
+            norBf["image data"].AsByteArray = norBytes;
+            var norInfo = new AssetFileInfo { PathId = neutralNorPid, TypeId = (int)AssetClassID.Texture2D, TypeIdOrIndex = texTypeIdx };
+            norInfo.SetNewData(norBf);
+            f.Metadata.AddAssetInfo(norInfo);
+        }
+
         // 6. Build native-rigged Mesh + bind to primary BodySkin SkinnedMeshRenderer
         var smrInfo = FindPrimaryBodySmr(am, battleInst);
         var smrBf = am.GetBaseField(battleInst, smrInfo);
@@ -504,7 +550,8 @@ internal static partial class Program
         vChArr[0]["stream"].AsByte = 0; vChArr[0]["offset"].AsByte = 0;  vChArr[0]["format"].AsByte = 0;  vChArr[0]["dimension"].AsByte = 3;
         vChArr[1]["stream"].AsByte = 0; vChArr[1]["offset"].AsByte = 12; vChArr[1]["format"].AsByte = 0;  vChArr[1]["dimension"].AsByte = 3;
         vChArr[2]["stream"].AsByte = 0; vChArr[2]["offset"].AsByte = 24; vChArr[2]["format"].AsByte = 0;  vChArr[2]["dimension"].AsByte = 4;
-        vChArr[4]["stream"].AsByte = 0; vChArr[4]["offset"].AsByte = 40; vChArr[4]["format"].AsByte = 0;  vChArr[4]["dimension"].AsByte = 2;
+        vChArr[3]["stream"].AsByte = 0; vChArr[3]["offset"].AsByte = 40; vChArr[3]["format"].AsByte = 2;  vChArr[3]["dimension"].AsByte = 4;
+        vChArr[4]["stream"].AsByte = 0; vChArr[4]["offset"].AsByte = 44; vChArr[4]["format"].AsByte = 0;  vChArr[4]["dimension"].AsByte = 2;
         vChArr[12]["stream"].AsByte = 1; vChArr[12]["offset"].AsByte = 0;  vChArr[12]["format"].AsByte = 0;  vChArr[12]["dimension"].AsByte = 4;
         vChArr[13]["stream"].AsByte = 1; vChArr[13]["offset"].AsByte = 16; vChArr[13]["format"].AsByte = 11; vChArr[13]["dimension"].AsByte = 4;
 
@@ -620,7 +667,6 @@ internal static partial class Program
                 string fk = fl["first"].AsString;
                 if (fk == "_Layer1Enable" || fk == "_Layer1OverLerpValue" || fk == "_RimMaskEnable" ||
                     fk == "_SpecularMaskEnable" || fk == "_SphereMaskEnable" ||
-                    fk == "_OcclusionStrength" || fk == "_BumpScale" ||
                     (!hasCustomEmi && fk == "_EmissionMaskUse"))
                     fl["second"].AsFloat = 0f;
                 if (isEyeMat && fk == "_CullMode")
@@ -633,7 +679,8 @@ internal static partial class Program
                 bool isCol = prop == "_Col0Tex" || prop == "_BaseMap" || prop == "_MainTex";
                 bool isEmi = prop == "_EmissionMaskTex" || prop == "_EmissionMap";
                 bool isAmb = prop == "_AmbientTex";
-                if (!isCol && !(isEmi && hasCustomEmi) && !isAmb)
+                bool isNor = prop == "_NormalMapTex";
+                if (!isCol && !(isEmi && hasCustomEmi) && !isAmb && !isNor)
                 {
                     tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = 0;
                     continue;
@@ -659,6 +706,10 @@ internal static partial class Program
                 else if (isAmb)
                 {
                     tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = neutralAmbPid;
+                }
+                else if (isNor)
+                {
+                    tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = neutralNorPid;
                 }
             }
 
