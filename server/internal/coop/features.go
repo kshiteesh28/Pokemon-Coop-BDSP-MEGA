@@ -222,6 +222,14 @@ func (s *Server) reservationGrace(c *client) {
 
 // ---------------------------------------------------------------- battle lobbies
 
+// maxPlayersFor caps lobby size by battle kind: gyms are solo or duo only.
+func maxPlayersFor(kind uint8) uint8 {
+	if kind == protocol.BattleGym {
+		return protocol.MaxGymPlayers
+	}
+	return protocol.MaxBattlePlayers
+}
+
 type lobby struct {
 	id       uint16
 	room     *room
@@ -264,7 +272,7 @@ func (s *Server) battleCreate(c *client, m protocol.BattleCreate) {
 		s.battleErr(c, c.lobby.id, protocol.BattleErrInLobby)
 		return
 	}
-	if m.Kind > protocol.BattleFree || m.MaxPlayers < 1 || m.MaxPlayers > protocol.MaxBattlePlayers {
+	if m.Kind > protocol.BattleFree || m.MaxPlayers < 1 || m.MaxPlayers > maxPlayersFor(m.Kind) {
 		s.battleErr(c, 0, protocol.BattleErrBadRequest)
 		return
 	}
