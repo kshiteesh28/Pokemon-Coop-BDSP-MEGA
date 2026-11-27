@@ -1,0 +1,5 @@
+# local build outputs and runtime data
+/coop-data.json
+/*.exe
+/coop-server
+/coop-sim
