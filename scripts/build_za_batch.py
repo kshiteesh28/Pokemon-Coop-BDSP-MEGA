@@ -378,17 +378,10 @@ def composite_material_srgb(
         c1 = np.array(cols.get("BaseColorLayer1", cols.get("BaseColor", (1.0, 1.0, 1.0))), dtype=np.float32)
         rgb_lin = alb_lin * c1
 
-    if not is_eye and ao_name in bntx_idx and "white_msk" not in ao_name:
-        ao = resize_rgba(decode_bntx_rgba(bntx_idx[ao_name], tmp_dir), out_h, out_w)[:, :, 0:1]
-        rgb_lin = rgb_lin * (0.92 + 0.08 * np.clip(ao, 0.0, 1.0))
-
-    # Luminous BDSP anime calibration (paired with neutral _NormalMapTex + _AmbientTex + VertexColor):
-    # Avoid darkening linear midtones so BDSP's real key light, specular sheen, and rim glow match vanilla.
-    rgb_lin = np.clip(rgb_lin * 1.06, 0.0, 1.0)
-    luma_g = 0.2126 * rgb_lin[:, :, 0:1] + 0.7152 * rgb_lin[:, :, 1:2] + 0.0722 * rgb_lin[:, :, 2:3]
-    sat_boost = 1.08 if is_eye else 1.16
-    rgb_lin = np.clip(luma_g + (rgb_lin - luma_g) * sat_boost, 0.0, 1.0)
-
+    # Pure hue-preserving PBR linear -> BDSP sRGB albedo with 0.94x highlight headroom.
+    # Avoid linear-space saturation boosts (which clip blue channels to 0 and shift warm oranges to mustard-yellow)
+    # and keep AO out of _Col0Tex so real per-pixel crevice shading lives natively in _AmbientTex.G.
+    rgb_lin = np.clip(rgb_lin * 0.94, 0.0, 1.0)
     rgb_srgb = linear_to_srgb(rgb_lin)
     out = np.ones((out_h, out_w, 4), dtype=np.float32)
     out[:, :, :3] = rgb_srgb
@@ -409,6 +402,41 @@ def composite_za_mat_with_mirror(
         mirrored = np.concatenate([half, half[:, ::-1, :]], axis=1)
         return resize_rgba(mirrored, tile_h, tile_w)
     return composite_material_srgb(mat_info, bntx_idx, tmp_dir, tile_w, tile_h, is_eye=is_eye)
+
+
+def composite_material_amb(
+    mat_info: dict,
+    bntx_idx: dict[str, Path],
+    tmp_dir: Path,
+    out_w: int,
+    out_h: int,
+    is_eye: bool = False,
+) -> np.ndarray:
+    """Bakes BDSP Linear _AmbientTex: R=0, G=inverted Z-A OcclusionMap (crevice shadow), B=115/255, A=1."""
+    out = np.zeros((out_h, out_w, 4), dtype=np.float32)
+    out[:, :, 2] = 115.0 / 255.0
+    out[:, :, 3] = 1.0
+    ao_name = mat_info["texs"].get("OcclusionMap", "")
+    if not is_eye and ao_name in bntx_idx and "white_msk" not in ao_name:
+        ao = resize_rgba(decode_bntx_rgba(bntx_idx[ao_name], tmp_dir), out_h, out_w)[:, :, 0]
+        out[:, :, 1] = np.clip((1.0 - np.clip(ao, 0.0, 1.0)) * 1.15, 0.0, 1.0)
+    return out
+
+
+def composite_za_amb_with_mirror(
+    mat_info: dict,
+    bntx_idx: dict[str, Path],
+    tmp_dir: Path,
+    tile_w: int,
+    tile_h: int,
+    is_eye: bool = False,
+) -> np.ndarray:
+    uv_so = mat_info["cols"].get("UVScaleOffset", (1.0, 1.0, 0.0))
+    if uv_so[0] > 1.5:
+        half = composite_material_amb(mat_info, bntx_idx, tmp_dir, tile_w // 2, tile_h, is_eye=is_eye)
+        mirrored = np.concatenate([half, half[:, ::-1, :]], axis=1)
+        return resize_rgba(mirrored, tile_h, tile_w)
+    return composite_material_amb(mat_info, bntx_idx, tmp_dir, tile_w, tile_h, is_eye=is_eye)
 
 
 def save_tex_raw_and_png(srgb_rgba: np.ndarray, stem: str, out_dir: Path) -> tuple[int, int]:
@@ -1145,6 +1173,8 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
                 is_eye = "eye" in zm.lower()
                 sz = 256 if is_eye else 512
                 img = composite_za_mat_with_mirror(trmtr[zm], bntx_idx, tmp_dir, sz, sz, is_eye=is_eye)
+                amb_sz = 128 if is_eye else 256
+                amb_img = composite_za_amb_with_mirror(trmtr[zm], bntx_idx, tmp_dir, amb_sz, amb_sz, is_eye=is_eye)
             else:
                 cols, rows = za_to_slot[zmats[0]]["grid"]
                 atlas_w = 1024
@@ -1153,14 +1183,26 @@ def build_variant(spec: MegaFormSpec, is_shiny: bool, files: dict[str, Path]) ->
                 tile_h = atlas_h // rows
                 img = np.zeros((atlas_h, atlas_w, 4), dtype=np.float32)
                 img[:, :, 3] = 1.0
+                amb_w = 512
+                amb_h = 256 if rows == 1 else 512
+                at_w = amb_w // cols
+                at_h = amb_h // rows
+                amb_img = np.zeros((amb_h, amb_w, 4), dtype=np.float32)
+                amb_img[:, :, 2] = 115.0 / 255.0
+                amb_img[:, :, 3] = 1.0
                 for zm in zmats:
                     c, r = za_to_slot[zm]["cell"]
                     is_eye = "eye" in zm.lower()
                     tile = composite_za_mat_with_mirror(trmtr[zm], bntx_idx, tmp_dir, tile_w, tile_h, is_eye=is_eye)
                     img[r * tile_h : (r + 1) * tile_h, c * tile_w : (c + 1) * tile_w, :] = tile
+                    atile = composite_za_amb_with_mirror(trmtr[zm], bntx_idx, tmp_dir, at_w, at_h, is_eye=is_eye)
+                    amb_img[r * at_h : (r + 1) * at_h, c * at_w : (c + 1) * at_w, :] = atile
             stem = f"Sub{slot}_col"
             w, h = save_tex_raw_and_png(img, stem, out_dir)
             textures_meta[stem] = [w, h]
+            amb_stem = f"Sub{slot}_amb"
+            aw, ah = save_tex_raw_and_png(amb_img, amb_stem, out_dir)
+            textures_meta[amb_stem] = [aw, ah]
 
         (out_dir / "textures.json").write_text(json.dumps(textures_meta, indent=2))
 

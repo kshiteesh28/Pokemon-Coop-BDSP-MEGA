@@ -434,7 +434,7 @@ internal static partial class Program
             texBf["m_IsReadable"].AsBool = false;
             texBf["m_ImageCount"].AsInt = 1;
             texBf["m_TextureDimension"].AsInt = 2;
-            texBf["m_ColorSpace"].AsInt = stem.EndsWith("_emi", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+            texBf["m_ColorSpace"].AsInt = (stem.EndsWith("_emi", StringComparison.OrdinalIgnoreCase) || stem.EndsWith("_amb", StringComparison.OrdinalIgnoreCase)) ? 0 : 1;
             texBf["m_TextureSettings.m_FilterMode"].AsInt = 1;
             texBf["m_TextureSettings.m_WrapU"].AsInt = 2;
             texBf["m_TextureSettings.m_WrapV"].AsInt = 0;
@@ -714,7 +714,8 @@ internal static partial class Program
                 }
                 else if (isAmb)
                 {
-                    tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = neutralAmbPid;
+                    long pAmb = texPids.TryGetValue($"Sub{matSlot}_amb", out long pSubA) ? pSubA : neutralAmbPid;
+                    tex["m_FileID"].AsInt = 0; tex["m_PathID"].AsLong = pAmb;
                 }
                 else if (isNor)
                 {
