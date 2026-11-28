@@ -25,6 +25,7 @@ type LobbyMemberView struct {
 	Helper bool   `json:"helper"` // already beat this one: joining to help
 	You    bool   `json:"you"`
 	IsHost bool   `json:"host"`
+	Result string `json:"result"` // during the battle: "", "won" or "lost" (reported by their game)
 }
 
 type LobbyView struct {
@@ -88,7 +89,7 @@ func (p *Player) handleLobbyPacket(t protocol.MsgType, payload []byte, logf func
 		var m protocol.BattleStart
 		if m.Unmarshal(payload) == nil && p.lobby != nil && p.lobby.LobbyID == m.LobbyID {
 			p.lobby.State = protocol.LobbyInBattle
-			p.note(fmt.Sprintf("%s started! Battle in your game, then the host reports the result here.", BattleName(p.lobby.Kind, p.lobby.Target)), true)
+			p.note(fmt.Sprintf("%s started! Each of you, go battle them in your game.", BattleName(p.lobby.Kind, p.lobby.Target)), true)
 		}
 	case protocol.MsgBattleEnd:
 		var m protocol.BattleEnd
@@ -159,7 +160,8 @@ func (p *Player) battleView(v *PlayerView) {
 			InBattle: l.State == protocol.LobbyInBattle, YouAreHost: l.Host == p.id, Members: []LobbyMemberView{}}
 		for _, m := range l.Members {
 			lv.Members = append(lv.Members, LobbyMemberView{ID: m.PlayerID, Name: p.nameOf(m.PlayerID), Ready: m.Ready != 0,
-				Helper: m.Completed != 0, You: m.PlayerID == p.id, IsHost: m.PlayerID == l.Host})
+				Helper: m.Completed != 0, You: m.PlayerID == p.id, IsHost: m.PlayerID == l.Host,
+				Result: map[uint8]string{protocol.ReportWon: "won", protocol.ReportLost: "lost"}[m.Report]})
 		}
 		v.Lobby = lv
 	}

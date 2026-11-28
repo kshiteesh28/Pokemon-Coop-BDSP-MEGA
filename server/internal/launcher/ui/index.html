@@ -497,7 +497,10 @@ function renderBattles(join) {
       h("span", { class: "badge" + (lobby.in_battle ? " battle" : "") }, lobby.in_battle ? "in battle" : lobby.members.length + "/" + lobby.max)),
     ...lobby.members.map(m => playerRow(m.name + (m.you ? " (you)" : ""),
       [m.host ? "Host" : null, m.helper ? "Helper: already has this badge" : null].filter(Boolean).join(" · ") || "Teammate",
-      h("span", { class: "badge" + (m.ready ? " you" : "") }, m.ready ? "✓ ready" : "not ready"))),
+      lobby.in_battle
+        ? h("span", { class: "badge" + (m.result === "won" ? " you" : m.result === "lost" ? " battle" : "") },
+            m.result === "won" ? "🏆 won" : m.result === "lost" ? "✕ lost" : "⚔ battling…")
+        : h("span", { class: "badge" + (m.ready ? " you" : "") }, m.ready ? "✓ ready" : "not ready"))),
   ];
   if (!lobby.in_battle) {
     if (lobby.members.length < lobby.max && invitable.length) {
@@ -510,7 +513,9 @@ function renderBattles(join) {
       lobby.you_are_host ? h("button", { class: "btn red", disabled: !allReady, title: allReady ? "" : "Everyone must be ready", onclick: () => act("/api/battle", { action: "start" }) }, "Start battle") : null,
       h("button", { class: "btn ghost", style: "margin-left:auto", onclick: () => act("/api/battle", { action: "leave" }) }, "Leave")));
   } else {
-    parts.push(h("div", { class: "banner warn" }, "Battle it out in your games. In-game team battles are still being built, so for now the host reports how it went:"));
+    parts.push(h("div", { class: "banner ok" }, "Each of you: go battle " + battleName(lobby.kind, lobby.target).replace(/^.*· /, "") +
+      " in your own game. With the co-op module installed, your game reports the result by itself when you're back in the overworld. The team wins if everyone wins."));
+    parts.push(h("div", { class: "sub", style: "margin-top:8px" }, lobby.you_are_host ? "No co-op module? Report it by hand:" : ""));
     parts.push(h("div", { class: "row wrap", style: "margin-top:10px" },
       lobby.you_are_host ? [
         h("button", { class: "btn green", onclick: () => act("/api/battle", { action: "result", outcome: 0 }) }, "We won 🏆"),
