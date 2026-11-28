@@ -9,7 +9,7 @@ Status: **server and app are done; the in-game part is planned here but not buil
 | App: open lobby, invite, join, ready, start, report result | ✅ done, tested (`server/internal/launcher`) |
 | Game: see others on your map (markers) | ✅ written (`src/coop/ghosts.cpp`), untested in game |
 | Game: report caught legendaries to the room | ✅ written (`src/coop/legend.cpp`), untested in game |
-| Game: block encounters with a legendary someone else owns | ⏳ needs a battle-setup hook (step 3) |
+| Game: legendary someone else owns → battle without Poké Balls; unclaimed ones released after a failed catch | ✅ written (`src/coop/bridge.cpp` + Mega's `SetupBattleWild`), untested in game |
 | Game: real 2-vs-2 battles synced between players | ⏳ steps 1–2 below |
 
 Until the game side exists, a team **opens a lobby in the app**, battles in their own games, and the **host clicks "We won" / "We lost"**. On a win, the server records the badge for everyone in the lobby.
@@ -39,10 +39,11 @@ Two exlaunch trampolines on the same address collide, as `src/mega/main.cpp` not
    - `setupPokeAction_FromClientInstruction`: for the partner's slot, use their action from `BATTLE_TURN` instead of the AI's choice.
    - An empty action means the partner timed out or disconnected: fall back to the AI for that slot, which the server already allows.
    - At the end, the host sends `BATTLE_RESULT`, and the server records badges for the team.
-3. **Legendary guard**
-   - In `SetupBattleWild`: if the opponent is a tracked legendary, send `LEGEND_RESERVE` and wait briefly for the ack. If someone else owns it or is battling it, cancel the encounter and show a message.
-   - On a catch, send `LEGEND_RESULT caught`. On fleeing or fainting it, send `escaped`.
-   - `legend.cpp` already reports catches by scanning the party; this step adds prevention.
+3. **Legendary guard (done)**
+   - Mega's `SetupBattleWild` calls `coop_legend_check` (exported by subsdk3). For a tracked legendary, the co-op client sends `LEGEND_RESERVE` and waits up to 0.8 s. Ordinary Pokémon never wait.
+   - If someone else owns it or is battling it, the battle runs with `isCantUseBall = true`: you can fight, but you can't catch it.
+   - If it was reserved for you and isn't in your party ~10 s after you're back in the field, it's released (`LEGEND_RESULT escaped`). If it is in your party, the party scan confirms the catch.
+   - If subsdk3 isn't installed, the lookup fails once and the Mega module behaves exactly as before.
 
 ## How to test (once there's a test loop)
 
