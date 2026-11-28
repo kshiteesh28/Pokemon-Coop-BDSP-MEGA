@@ -27,7 +27,11 @@ enum MsgType : uint8_t {
     LegendReserveAck = 0x21,
     LegendResult = 0x22,
     LegendUpdate = 0x23,
+    BattleLobby = 0x31,
+    BattleStart = 0x36,
+    BattleEnd = 0x3A,
     Progress = 0x3C,
+    BattleReport = 0x3D,
     Chat = 0x40,
 };
 
