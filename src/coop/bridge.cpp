@@ -21,7 +21,15 @@ COOP_EXPORT int coop_legend_check(int32_t species, int32_t timeoutMs) {
     return coop::CheckLegendForBattle(static_cast<uint16_t>(species), timeoutMs) ? 1 : 0;
 }
 
+// Called by the Mega module right after a trainer battle is set up.
+// Logs the battle's setup (for future 2-vs-2 work) and, if your battle lobby
+// has started, makes this battle count for the team.
+COOP_EXPORT void coop_trainer_battle_begin(void* setupParam, int32_t enemyID0, int32_t enemyID1, int32_t partnerID,
+                                           int32_t rule) {
+    coop::OnTrainerBattleBegin(setupParam, enemyID0, enemyID1, partnerID, rule);
+}
+
 // Version so the Mega module can tell which features this subsdk3 has.
 COOP_EXPORT int coop_bridge_version() {
-    return 1;
+    return 2;
 }
