@@ -419,3 +419,114 @@ func TestRoomRoster(t *testing.T) {
 	b.Close()
 	want(a, "Ash")
 }
+
+func TestTeamChallengeFromGameReports(t *testing.T) {
+	addr := startServer(t, Config{})
+	a, ackA := joinID(t, addr, "TC", "Ash", 1)
+	b, _ := joinID(t, addr, "TC", "Brock", 2)
+	start := func() uint16 {
+		a.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleGym, Target: 2, MaxPlayers: 2}).Marshal())
+		l := lobbyOf(t, a)
+		b.Send(protocol.MsgBattleJoin, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+		time.Sleep(80 * time.Millisecond)
+		for _, c := range []*mockclient.Client{a, b} {
+			c.Send(protocol.MsgBattleReady, (&protocol.BattleReady{LobbyID: l.LobbyID, Ready: 1}).Marshal())
+		}
+		time.Sleep(80 * time.Millisecond)
+		a.Send(protocol.MsgBattleStart, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+		var st protocol.BattleStart
+		recv(t, b, protocol.MsgBattleStart, &st)
+		return l.LobbyID
+	}
+	// Round 1: Ash wins, Brock loses -> team loses, no badge.
+	id := start()
+	a.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: id, Outcome: protocol.OutcomeWin, TrainerID: 77}).Marshal())
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) { // Brock sees Ash marked as won
+		var l protocol.BattleLobby
+		recv(t, b, protocol.MsgBattleLobby, &l)
+		if len(l.Members) == 2 && l.Members[0].PlayerID == ackA.PlayerID && l.Members[0].Report == protocol.ReportWon && l.Members[1].Report == protocol.ReportPending {
+			break
+		}
+	}
+	b.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: id, Outcome: protocol.OutcomeLoss, TrainerID: 77}).Marshal())
+	var end protocol.BattleEnd
+	recv(t, a, protocol.MsgBattleEnd, &end)
+	if end.Outcome != protocol.OutcomeLoss {
+		t.Fatalf("one loss should lose the team challenge: %+v", end)
+	}
+	// Round 2: both win -> badge for both.
+	id = start()
+	for _, c := range []*mockclient.Client{a, b} {
+		c.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: id, Outcome: protocol.OutcomeWin}).Marshal())
+	}
+	for _, c := range []*mockclient.Client{a, b} {
+		recv(t, c, protocol.MsgBattleEnd, &end)
+		if end.Outcome != protocol.OutcomeWin {
+			t.Fatalf("both won: %+v", end)
+		}
+		var pr protocol.Progress
+		for len(pr.Entries) == 0 {
+			recv(t, c, protocol.MsgProgress, &pr)
+		}
+		if pr.Entries[0] != (protocol.ProgressEntry{Kind: protocol.BattleGym, Target: 2}) {
+			t.Fatalf("progress %+v", pr)
+		}
+	}
+}
+
+func TestTeamChallengeFinishesWhenLoserLeaves(t *testing.T) {
+	addr := startServer(t, Config{})
+	a, _ := joinID(t, addr, "TL", "Ash", 1)
+	b, _ := joinID(t, addr, "TL", "Brock", 2)
+	a.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleEliteFour, Target: 1, MaxPlayers: 2}).Marshal())
+	l := lobbyOf(t, a)
+	b.Send(protocol.MsgBattleJoin, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	time.Sleep(80 * time.Millisecond)
+	for _, c := range []*mockclient.Client{a, b} {
+		c.Send(protocol.MsgBattleReady, (&protocol.BattleReady{LobbyID: l.LobbyID, Ready: 1}).Marshal())
+	}
+	time.Sleep(80 * time.Millisecond)
+	a.Send(protocol.MsgBattleStart, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	var st protocol.BattleStart
+	recv(t, a, protocol.MsgBattleStart, &st)
+	a.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: l.LobbyID, Outcome: protocol.OutcomeWin}).Marshal())
+	time.Sleep(80 * time.Millisecond)
+	b.Close() // Brock quits mid-battle: Ash is the only one left and won.
+	var end protocol.BattleEnd
+	recv(t, a, protocol.MsgBattleEnd, &end)
+	if end.Outcome != protocol.OutcomeWin || len(end.Players) != 1 {
+		t.Fatalf("end %+v", end)
+	}
+}
+
+func TestGameReportsForLobbyMadeInApp(t *testing.T) {
+	addr := startServer(t, Config{})
+	app, _ := joinID(t, addr, "LK", "Aaroh", 0) // the app
+	friend, _ := joinID(t, addr, "LK", "Rahul", 0)
+	app.Send(protocol.MsgBattleCreate, (&protocol.BattleCreate{Kind: protocol.BattleGym, Target: 3, MaxPlayers: 2}).Marshal())
+	l := lobbyOf(t, app)
+	friend.Send(protocol.MsgBattleJoin, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	time.Sleep(80 * time.Millisecond)
+
+	// Aaroh's game connects later (same name = same player) and is told about the lobby.
+	game, _ := joinID(t, addr, "LK", "Aaroh", 0)
+	if gl := lobbyOf(t, game); gl.LobbyID != l.LobbyID {
+		t.Fatalf("game got lobby %+v", gl)
+	}
+	for _, c := range []*mockclient.Client{app, friend} {
+		c.Send(protocol.MsgBattleReady, (&protocol.BattleReady{LobbyID: l.LobbyID, Ready: 1}).Marshal())
+	}
+	time.Sleep(80 * time.Millisecond)
+	app.Send(protocol.MsgBattleStart, (&protocol.LobbyRef{LobbyID: l.LobbyID}).Marshal())
+	var st protocol.BattleStart
+	recv(t, game, protocol.MsgBattleStart, &st) // the game hears the start too
+	// Both players' games report wins -> team wins.
+	game.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: l.LobbyID, Outcome: protocol.OutcomeWin}).Marshal())
+	friend.Send(protocol.MsgBattleReport, (&protocol.BattleReport{LobbyID: l.LobbyID, Outcome: protocol.OutcomeWin}).Marshal())
+	var end protocol.BattleEnd
+	recv(t, game, protocol.MsgBattleEnd, &end)
+	if end.Outcome != protocol.OutcomeWin {
+		t.Fatalf("end %+v", end)
+	}
+}

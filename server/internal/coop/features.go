@@ -98,6 +98,11 @@ func (s *Server) handleFeature(c *client, t protocol.MsgType, p []byte, now time
 		}
 	case protocol.MsgChat:
 		s.onChat(c, p, now)
+	case protocol.MsgBattleReport:
+		var m protocol.BattleReport
+		if m.Unmarshal(p) == nil {
+			s.battleReport(c, m)
+		}
 	case protocol.MsgBattleResult:
 		var m protocol.BattleResult
 		if m.Unmarshal(p) == nil {
@@ -120,6 +125,10 @@ func (s *Server) sendInitialFeatureState(c *client) {
 		}
 	}
 	s.sendProgress(c)
+	// Joining from the game while your app is already in a lobby: tell the game.
+	if m := s.lobbyMember(c); m != c && m.lobby != nil {
+		s.send(c, protocol.MsgBattleLobby, s.lobbyState(m.lobby))
+	}
 }
 
 func (s *Server) broadcastLegend(room string, species uint16, state uint8, owner string) {
@@ -245,6 +254,7 @@ type lobby struct {
 	turn     uint16
 	actions  map[*client][]byte
 	deadline time.Time
+	reports  map[*client]uint8 // in-game results during a team challenge
 }
 
 func (s *Server) battleErr(c *client, id uint16, code uint8) {
@@ -261,15 +271,38 @@ func (s *Server) lobbyState(l *lobby) []byte {
 		if l.kind <= protocol.BattleChampion && s.store.HasAchievement(c.key, store.Achievement{Kind: l.kind, Target: l.target}) {
 			bm.Completed = 1
 		}
+		bm.Report = l.reports[c]
 		m.Members = append(m.Members, bm)
 	}
 	return m.Marshal()
 }
 
+// broadcastLobby sends to every member, and also to their linked
+// connections: the same player connected from both the app and the game.
 func (s *Server) broadcastLobby(l *lobby, t protocol.MsgType, payload []byte) {
 	for _, c := range l.members {
 		s.send(c, t, payload)
+		for _, other := range l.room.players {
+			if other != c && other.lobby == nil && other.key == c.key {
+				s.send(other, t, payload)
+			}
+		}
 	}
+}
+
+// lobbyMember returns the connection that's actually in a lobby for this
+// player: c itself, or the same player's other connection in the room (e.g.
+// the lobby was made in the app, and c is the game).
+func (s *Server) lobbyMember(c *client) *client {
+	if c.lobby != nil || c.room == nil {
+		return c
+	}
+	for _, other := range c.room.players {
+		if other != c && other.lobby != nil && other.key == c.key {
+			return other
+		}
+	}
+	return c
 }
 
 func (s *Server) battleCreate(c *client, m protocol.BattleCreate) {
@@ -288,7 +321,7 @@ func (s *Server) battleCreate(c *client, m protocol.BattleCreate) {
 		}
 	}
 	l := &lobby{id: s.nextLobby, room: c.room, kind: m.Kind, target: m.Target, max: int(m.MaxPlayers), host: c,
-		members: []*client{c}, ready: map[*client]bool{}, actions: map[*client][]byte{}}
+		members: []*client{c}, ready: map[*client]bool{}, actions: map[*client][]byte{}, reports: map[*client]uint8{}}
 	s.lobbies[l.id] = l
 	c.lobby = l
 	s.send(c, protocol.MsgBattleLobby, s.lobbyState(l))
@@ -345,6 +378,7 @@ func (s *Server) lobbyLeave(c *client) {
 	}
 	delete(l.ready, c)
 	delete(l.actions, c)
+	delete(l.reports, c)
 	if len(l.members) == 0 {
 		delete(s.lobbies, l.id)
 		return
@@ -355,6 +389,7 @@ func (s *Server) lobbyLeave(c *client) {
 	s.broadcastLobby(l, protocol.MsgBattleLobby, s.lobbyState(l))
 	if l.state == protocol.LobbyInBattle {
 		s.maybeFinishTurn(l, false)
+		s.maybeFinishFromReports(l)
 	}
 }
 
@@ -443,11 +478,50 @@ func (s *Server) battleResult(c *client, m protocol.BattleResult) {
 		s.battleErr(c, m.LobbyID, protocol.BattleErrNotHost)
 		return
 	}
-	end := protocol.BattleEnd{LobbyID: l.id, Outcome: m.Outcome}
+	s.finishBattle(l, m.Outcome, "reported by host")
+}
+
+// battleReport records one member's in-game result; when everyone has
+// reported, the team wins only if all of them won.
+func (s *Server) battleReport(c *client, m protocol.BattleReport) {
+	c = s.lobbyMember(c) // the game reports for the lobby its player joined in the app
+	l := c.lobby
+	if l == nil || l.id != m.LobbyID || l.state != protocol.LobbyInBattle {
+		s.battleErr(c, m.LobbyID, protocol.BattleErrNotMember)
+		return
+	}
+	r := protocol.ReportLost
+	if m.Outcome == protocol.OutcomeWin {
+		r = protocol.ReportWon
+	}
+	l.reports[c] = r
+	s.logf("room %s: %q %s their battle in lobby %d (trainer %d)", l.room.code, c.app.Name, map[bool]string{true: "won", false: "lost"}[r == protocol.ReportWon], l.id, m.TrainerID)
+	s.broadcastLobby(l, protocol.MsgBattleLobby, s.lobbyState(l))
+	s.maybeFinishFromReports(l)
+}
+
+func (s *Server) maybeFinishFromReports(l *lobby) {
+	if l.state != protocol.LobbyInBattle || len(l.members) == 0 {
+		return
+	}
+	outcome := protocol.OutcomeWin
+	for _, m := range l.members {
+		switch l.reports[m] {
+		case protocol.ReportPending:
+			return // someone is still fighting
+		case protocol.ReportLost:
+			outcome = protocol.OutcomeLoss
+		}
+	}
+	s.finishBattle(l, outcome, "everyone reported from their game")
+}
+
+func (s *Server) finishBattle(l *lobby, outcome uint8, how string) {
+	end := protocol.BattleEnd{LobbyID: l.id, Outcome: outcome}
 	for _, p := range l.members {
 		end.Players = append(end.Players, p.pid)
 	}
-	credit := m.Outcome == protocol.OutcomeWin && l.kind <= protocol.BattleChampion
+	credit := outcome == protocol.OutcomeWin && l.kind <= protocol.BattleChampion
 	s.broadcastLobby(l, protocol.MsgBattleEnd, end.Marshal())
 	for _, p := range append([]*client(nil), l.members...) {
 		if credit {
@@ -460,8 +534,8 @@ func (s *Server) battleResult(c *client, m protocol.BattleResult) {
 		p.lobby = nil
 	}
 	delete(s.lobbies, l.id)
-	result := map[bool]string{true: "WON", false: "lost"}[m.Outcome == protocol.OutcomeWin]
-	s.logf("room %s: battle lobby %d %s (kind %d, target %d, %d players)", l.room.code, l.id, result, l.kind, l.target, len(end.Players))
+	result := map[bool]string{true: "WON", false: "lost"}[outcome == protocol.OutcomeWin]
+	s.logf("room %s: battle lobby %d %s (kind %d, target %d, %d players, %s)", l.room.code, l.id, result, l.kind, l.target, len(end.Players), how)
 }
 
 func (s *Server) sendProgress(c *client) {
