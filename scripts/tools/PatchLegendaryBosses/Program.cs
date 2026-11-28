@@ -124,7 +124,7 @@ internal static class Program
         );
         var lugia = new MonSpec(
             "Lugia", 249, 0, 1120 /* Heavy-Duty Boots */, 136 /* Multiscale */, 5 /* Bold */, true,
-            new[] { 252, 0, 160, 0, 0, 96 }, new[] { 177 /* Aeroblast */, 58 /* Ice Beam */, 347 /* Calm Mind */, 105 /* Recover */ }
+            new[] { 252, 0, 160, 0, 0, 96 }, new[] { 177 /* Aeroblast */, 56 /* Hydro Pump */, 347 /* Calm Mind */, 105 /* Recover */ }
         );
         var arceusCynthia = new MonSpec(
             "Arceus", 493, 0, 251 /* Silk Scarf */, 121 /* Multitype */, 13 /* Jolly */, false,
