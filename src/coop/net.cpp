@@ -39,6 +39,13 @@ struct LegendOwner {
 LegendOwner gLegends[40];
 int gBadges = 0;  // gyms/E4/Champion recorded by the server for you
 
+// Latest LEGEND_RESERVE_ACK per species, so the battle guard can wait for it.
+constexpr int kMaxSpecies = 1024;
+volatile uint8_t gAckStatus[kMaxSpecies];
+volatile uint32_t gAckSeq[kMaxSpecies];
+// Reserves sent because the species turned up in your party: confirm as caught.
+volatile bool gFoundPending[kMaxSpecies];
+
 void setLegend(uint16_t species, uint8_t state, const char* owner) {
     LegendOwner* slot = nullptr;
     for (auto& l : gLegends) {
@@ -280,12 +287,20 @@ void handlePacket(uint8_t type, const uint8_t* p, size_t n) {
             char holder[25];
             r.str(holder, 24, sizeof(holder));
             if (!r.ok) break;
-            if (status == 0) {  // granted: it's ours, confirm the catch
+            bool found = species < kMaxSpecies && gFoundPending[species];
+            if (species < kMaxSpecies) {
+                gFoundPending[species] = false;
+                gAckStatus[species] = status;
+                __atomic_add_fetch(&gAckSeq[species], 1, __ATOMIC_SEQ_CST);
+            }
+            if (status == 0 && found) {  // it's in your party and nobody else has it: confirm the catch
                 Writer w;
                 w.put<uint16_t>(species);
                 w.put<uint8_t>(0);  // caught
                 sendPacket(w, LegendResult);
                 Log("Legendary #%d is now yours in room %s", species, gSettings.room);
+            } else if (status == 0) {
+                Log("Legendary #%d reserved for your battle", species);
             } else if (status == 1) {
                 Log("%s already owns legendary #%d in this room: yours won't count", holder, species);
             } else if (status == 2) {
@@ -426,10 +441,19 @@ void sendThreadMain(void*) {
                 continue;
             }
         }
-        for (uint16_t species; gConnected && PopCaughtLegend(species);) {
+        uint16_t species;
+        LegendEvent kind;
+        while (gConnected && PopLegendEvent(species, kind)) {
             Writer w;
             w.put<uint16_t>(species);
-            if (!sendPacket(w, LegendReserve)) break;
+            if (kind == LegendEvent::FoundInParty) {
+                if (species < kMaxSpecies) gFoundPending[species] = true;
+                if (!sendPacket(w, LegendReserve)) break;
+            } else {
+                w.put<uint8_t>(1);  // escaped: fled, fainted it, or lost
+                if (!sendPacket(w, LegendResult)) break;
+                Log("Legendary #%d released for others", species);
+            }
         }
         if (tick % 40 == 0) {  // keep-alive every 2 s, also while in menus/battles
             Writer w;
@@ -441,6 +465,26 @@ void sendThreadMain(void*) {
 }  // namespace
 
 bool IsConnected() { return gConnected; }
+
+bool CheckLegendForBattle(uint16_t species, int32_t timeoutMs) {
+    // Ordinary wild Pokemon never wait on the network.
+    if (!gConnected || species >= kMaxSpecies || !IsTrackedLegend(species)) return false;
+    uint32_t before = gAckSeq[species];
+    Writer w;
+    w.put<uint16_t>(species);
+    if (!sendPacket(w, LegendReserve)) return false;
+    // Short wait on the main thread; if the server is slow, don't hold up the game.
+    for (int waited = 0; waited < timeoutMs && gAckSeq[species] == before; waited += 10) svcSleepThread(10 * kMs);
+    if (gAckSeq[species] == before) {
+        Log("No answer about legendary #%d in time; battle allowed", species);
+        return false;
+    }
+    uint8_t status = gAckStatus[species];
+    if (status == 0) NoteLegendBattle(species);  // reserved for you: release later if not caught
+    bool blocked = status == 1 || status == 2;   // owned by / being battled by someone else
+    if (blocked) Log("Legendary #%d belongs to someone else in your room: no Poke Balls this battle", species);
+    return blocked;
+}
 
 int GetRemotePlayers(RemotePlayer* out, int max) {
     int n = 0;
