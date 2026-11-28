@@ -2051,6 +2051,22 @@ inline LegendCheckFn legendCheck() {
     return fn;
 }
 
+using TrainerBattleBeginFn = void (*)(void* setupParam, int32_t enemyID0, int32_t enemyID1, int32_t partnerID,
+                                      int32_t rule);
+
+inline TrainerBattleBeginFn trainerBattleBegin() {
+    static bool looked = false;
+    static TrainerBattleBeginFn fn = nullptr;
+    if (!looked) {
+        looked = true;
+        uintptr_t address = 0;
+        if (nn::ro::LookupSymbol(&address, "coop_trainer_battle_begin") == 0 && address != 0) {
+            fn = reinterpret_cast<TrainerBattleBeginFn>(address);
+        }
+    }
+    return fn;
+}
+
 // True if a co-op room says this wild legendary belongs to someone else.
 inline bool wildLegendBlocked(Pml::PokeParty::Object* enemyParty) {
     LegendCheckFn fn = legendCheck();
@@ -2096,6 +2112,10 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleTrainer) {
                                      rule == static_cast<int32_t>(Dpr::Battle::Logic::BtlRule::BTL_RULE_RAID));
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
         Orig(battleSetupParam, arenaID, mapAttrib, weatherType, rule, enemyID0, enemyID1, partnerID, methodInfo);
+        // Co-op: team challenges and battle probe logging (no-op without subsdk3).
+        if (auto fn = coopbridge::trainerBattleBegin()) {
+            fn(battleSetupParam, enemyID0, enemyID1, partnerID, rule);
+        }
     }
 };
 
