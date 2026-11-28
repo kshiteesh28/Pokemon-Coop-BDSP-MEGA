@@ -22,6 +22,17 @@ Everything is in one window, in two steps:
 
 Closing the window quits the app and stops hosting. The window is the app's own page shown by Edge/Chrome in *app mode* (no tabs or address bar). The app only listens on `127.0.0.1` and every request needs a random per-launch token, so websites can't control it.
 
+## Room roster (0x11)
+
+Sent to the whole room whenever someone joins, leaves or changes map: `count u8, count × (player_id u16, zone i32, name[24])`. The app uses it to name lobby members and offer invites, whatever map people are on.
+
+## Team battles in the app
+
+The **Team battles** card opens a server lobby for a gym, an Elite Four member or the Champion.
+- You can invite anyone in the room. Players who already have that badge show up as **Helpers**.
+- When everyone is ready, the host starts the battle.
+- Until in-game battle sync exists (see `docs/COOP_BATTLES.md`), the host reports **We won / We lost**, and a win records the badge for the whole team.
+
 ## Room chat (0x40)
 
 | Dir | Payload |
