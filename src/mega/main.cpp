@@ -1,4 +1,5 @@
 #include "exlaunch.hpp"
+#include "nn/ro.h"
 
 #include "externals/BTL_STRID_SET.h"
 #include "externals/FlagWork.h"
@@ -2031,6 +2032,35 @@ HOOK_DEFINE_TRAMPOLINE(CalcActionPriority$$Execute) {
     }
 };
 
+// ---------------------------------------------------------------- co-op bridge
+// Optional link to the co-op client (subsdk3). If subsdk3 isn't installed the
+// symbol lookup fails once and none of this does anything.
+namespace coopbridge {
+using LegendCheckFn = int (*)(int32_t species, int32_t timeoutMs);
+
+inline LegendCheckFn legendCheck() {
+    static bool looked = false;
+    static LegendCheckFn fn = nullptr;
+    if (!looked) {
+        looked = true;
+        uintptr_t address = 0;
+        if (nn::ro::LookupSymbol(&address, "coop_legend_check") == 0 && address != 0) {
+            fn = reinterpret_cast<LegendCheckFn>(address);
+        }
+    }
+    return fn;
+}
+
+// True if a co-op room says this wild legendary belongs to someone else.
+inline bool wildLegendBlocked(Pml::PokeParty::Object* enemyParty) {
+    LegendCheckFn fn = legendCheck();
+    if (fn == nullptr || enemyParty == nullptr) return false;
+    auto* lead = reinterpret_cast<Pml::PokePara::CoreParam::Object*>(enemyParty->GetMemberPointer(0));
+    if (lead == nullptr) return false;
+    return fn(lead->GetMonsNo(), 800) != 0;
+}
+}  // namespace coopbridge
+
 HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
     static void Callback(Dpr::Battle::Logic::BATTLE_SETUP_PARAM::Object* battleSetupParam,
                          Pml::PokeParty::Object* iPtrEnemyParty, int32_t arenaID, int32_t mapAttrib, int32_t weatherType,
@@ -2043,6 +2073,10 @@ HOOK_DEFINE_TRAMPOLINE(SetupBattleWild) {
                                battleSetupParam->fields.rule == Dpr::Battle::Logic::BtlRule::BTL_RULE_SAFARI);
         mega::gMegaBattleAllowed = !(isCaptureDemo || isSafari);
         FlagWork::SetFlag(FlagWork_Flag::FLAG_MEGA_EVOLUTION_UNAVAILABLE, !mega::gMegaBattleAllowed);
+        // Co-op: someone else in your room owns this legendary -> fight it, but no Poke Balls.
+        if (!isCaptureDemo && !isSafari && coopbridge::wildLegendBlocked(iPtrEnemyParty)) {
+            isCantUseBall = true;
+        }
         Orig(battleSetupParam, iPtrEnemyParty, arenaID, mapAttrib, weatherType, isSwim, isFishing, partnerID,
              isCaptureDemo, safariBallNum, isSymbol, isMitu, overlapBgm, overlapSetupEffectId, isCantUseBall,
              methodInfo);
