@@ -146,6 +146,12 @@
   .toast.show { opacity: 1; transform: none; }
   .toast.good { background: #0f2219; border-color: #1f4f39; color: #b9f5d6; }
   .hidden { display: none !important; }
+  .sel { width: 100%; background: #0f1722; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; color: var(--text); outline: none; }
+  .sel:focus { border-color: var(--blue); }
+  .lobby-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .lobby-head b { font-size: 15px; }
+  .invite { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 9px 10px; border-radius: 10px; background: #2b2210; border: 1px solid #5a4416; color: #ffd890; font-size: 13px; }
+  .invite .btn { margin-left: auto; }
 </style>
 </head>
 <body>
@@ -205,6 +211,21 @@
     <section class="card">
       <h2>Players <span class="right" id="players-right"></span></h2>
       <div class="players" id="players"></div>
+    </section>
+    <section class="card">
+      <h2>Team battles <span class="right" id="battle-right"></span></h2>
+      <div id="battle-off" class="empty">Join a room to team up for gyms, the Elite Four and the Champion.</div>
+      <div id="battle-create" class="hidden">
+        <div class="grid2">
+          <div class="full"><label for="b-target">Challenge</label>
+            <select id="b-target" class="sel"></select></div>
+          <div><label for="b-size">Team</label>
+            <select id="b-size" class="sel"><option value="1">Solo</option><option value="2" selected>Duo</option></select></div>
+          <div style="display:flex; align-items:flex-end"><button class="btn red" style="width:100%" id="b-create">Open lobby</button></div>
+        </div>
+        <div id="b-invites"></div>
+      </div>
+      <div id="battle-lobby" class="hidden"></div>
     </section>
     <section class="card chat">
       <h2>Room chat <span class="right" id="chat-room"></span></h2>
@@ -383,6 +404,7 @@ function render() {
   fill($("host-detail"), det);
 
   renderPlayers(s);
+  renderBattles(join);
   renderChat(join);
   renderGame(s.game);
   renderLegends(s);
@@ -420,6 +442,83 @@ function renderPlayers(s) {
     out.push(h("div", { class: "empty" }, "Host a server or join a room to see players here."));
   }
   fill($("players"), out);
+}
+
+const BATTLES = [
+  ...["Roark", "Gardenia", "Maylene", "Crasher Wake", "Fantina", "Byron", "Candice", "Volkner"].map((n, i) => ({ kind: 0, target: i + 1, label: "Gym " + (i + 1) + " · " + n, max: 2 })),
+  ...["Aaron", "Bertha", "Flint", "Lucian"].map((n, i) => ({ kind: 1, target: i + 1, label: "Elite Four · " + n, max: 2 })),
+  { kind: 2, target: 1, label: "Champion · Cynthia", max: 4 },
+];
+const battleName = (k, t) => (BATTLES.find(b => b.kind === k && b.target === t) || { label: "Battle" }).label;
+(function initBattleForm() {
+  const sel = $("b-target");
+  BATTLES.forEach((b, i) => sel.append(h("option", { value: i }, b.label)));
+  const sizes = () => {
+    const b = BATTLES[+sel.value], size = $("b-size"), keep = size.value;
+    fill(size, [1, 2, 3, 4].filter(n => n <= b.max).map(n => h("option", { value: n }, ["Solo", "Duo", "Trio", "Squad of 4"][n - 1])));
+    size.value = +keep <= b.max ? keep : String(Math.min(2, b.max));
+  };
+  sel.onchange = sizes; sizes();
+  $("b-create").onclick = () => {
+    const b = BATTLES[+sel.value];
+    act("/api/battle", { action: "create", kind: b.kind, target: b.target, max: +$("b-size").value });
+  };
+})();
+
+let lastNoteSeq = 0;
+function renderBattles(join) {
+  const online = join.state === "online", lobby = join.lobby;
+  $("battle-off").classList.toggle("hidden", online);
+  $("battle-create").classList.toggle("hidden", !online || !!lobby);
+  $("battle-lobby").classList.toggle("hidden", !online || !lobby);
+  $("battle-right").textContent = lobby ? (lobby.in_battle ? "in battle" : "lobby open") : "";
+  if (join.battle_note && join.battle_note.seq > lastNoteSeq) {
+    if (lastNoteSeq > 0 || join.battle_note.seq === 1) toast(join.battle_note.text, join.battle_note.good);
+    lastNoteSeq = join.battle_note.seq;
+  }
+  if (!online) return;
+
+  fill($("b-invites"), (join.invites || []).map(inv => h("div", { class: "invite" },
+    h("span", {}, h("b", {}, inv.from), " invited you to ", h("b", {}, battleName(inv.kind, inv.target))),
+    h("button", { class: "btn small green", onclick: () => act("/api/battle", { action: "join", lobby: inv.lobby }) }, "Join"),
+    h("button", { class: "btn small ghost", onclick: () => act("/api/battle", { action: "decline", lobby: inv.lobby }) }, "No thanks"))));
+  if (!lobby) { renderBattles.lastKey = ""; return; }
+
+  const me = lobby.members.find(m => m.you) || {};
+  const allReady = lobby.members.length > 0 && lobby.members.every(m => m.ready);
+  const inLobby = new Set(lobby.members.map(m => m.id));
+  const invitable = (join.roster || []).filter(r => !r.you && !inLobby.has(r.id));
+  // Only rebuild when something changed, so an open dropdown isn't closed by the refresh.
+  const key = JSON.stringify([lobby, invitable.map(r => r.id + r.name)]);
+  if (key === renderBattles.lastKey) return;
+  renderBattles.lastKey = key;
+  const parts = [
+    h("div", { class: "lobby-head" }, h("b", {}, battleName(lobby.kind, lobby.target)),
+      h("span", { class: "badge" + (lobby.in_battle ? " battle" : "") }, lobby.in_battle ? "in battle" : lobby.members.length + "/" + lobby.max)),
+    ...lobby.members.map(m => playerRow(m.name + (m.you ? " (you)" : ""),
+      [m.host ? "Host" : null, m.helper ? "Helper: already has this badge" : null].filter(Boolean).join(" · ") || "Teammate",
+      h("span", { class: "badge" + (m.ready ? " you" : "") }, m.ready ? "✓ ready" : "not ready"))),
+  ];
+  if (!lobby.in_battle) {
+    if (lobby.members.length < lobby.max && invitable.length) {
+      const pick = h("select", { class: "sel", id: "b-invite-who" }, invitable.map(r => h("option", { value: r.id }, r.name)));
+      parts.push(h("div", { class: "row", style: "margin-top:10px" }, pick,
+        h("button", { class: "btn small", onclick: () => act("/api/battle", { action: "invite", player: +pick.value }, "Invite sent") }, "Invite")));
+    }
+    parts.push(h("div", { class: "row wrap", style: "margin-top:10px" },
+      h("button", { class: "btn " + (me.ready ? "ghost" : "green"), onclick: () => act("/api/battle", { action: me.ready ? "unready" : "ready" }) }, me.ready ? "Not ready" : "I'm ready"),
+      lobby.you_are_host ? h("button", { class: "btn red", disabled: !allReady, title: allReady ? "" : "Everyone must be ready", onclick: () => act("/api/battle", { action: "start" }) }, "Start battle") : null,
+      h("button", { class: "btn ghost", style: "margin-left:auto", onclick: () => act("/api/battle", { action: "leave" }) }, "Leave")));
+  } else {
+    parts.push(h("div", { class: "banner warn" }, "Battle it out in your games. In-game team battles are still being built, so for now the host reports how it went:"));
+    parts.push(h("div", { class: "row wrap", style: "margin-top:10px" },
+      lobby.you_are_host ? [
+        h("button", { class: "btn green", onclick: () => act("/api/battle", { action: "result", outcome: 0 }) }, "We won 🏆"),
+        h("button", { class: "btn ghost", onclick: () => act("/api/battle", { action: "result", outcome: 1 }) }, "We lost"),
+      ] : h("span", { class: "sub" }, "Waiting for the host to report the result…"),
+      h("button", { class: "btn ghost", style: "margin-left:auto", onclick: () => act("/api/battle", { action: "leave" }) }, "Leave")));
+  }
+  fill($("battle-lobby"), parts);
 }
 
 function renderChat(join) {
