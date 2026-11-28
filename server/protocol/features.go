@@ -448,3 +448,37 @@ func (m *Progress) Unmarshal(b []byte) error {
 	}
 	return r.err
 }
+
+// MsgRoomRoster (0x11, S→C) lists everyone in the room, whatever map they're
+// on. Sent to the whole room whenever someone joins, leaves or changes map.
+// count u8, count × (player_id u16, zone i32, name[24]).
+const MsgRoomRoster MsgType = 0x11
+
+type RosterEntry struct {
+	PlayerID uint16
+	Zone     int32
+	Name     string
+}
+
+type RoomRoster struct{ Entries []RosterEntry }
+
+func (m *RoomRoster) Marshal() []byte {
+	w := &writer{}
+	w.u8(uint8(len(m.Entries)))
+	for _, e := range m.Entries {
+		w.u16(e.PlayerID)
+		w.i32(e.Zone)
+		w.str(e.Name, 24)
+	}
+	return w.b
+}
+
+func (m *RoomRoster) Unmarshal(b []byte) error {
+	r := &reader{b: b}
+	n := int(r.u8())
+	m.Entries = nil
+	for i := 0; i < n && r.err == nil; i++ {
+		m.Entries = append(m.Entries, RosterEntry{r.u16(), r.i32(), r.str(24)})
+	}
+	return r.err
+}
