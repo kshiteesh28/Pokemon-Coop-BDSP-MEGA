@@ -62,6 +62,7 @@ void OnUpdateHook(FieldPlayerEntity::Object* self, float deltaTime, const Method
 
     UpdateGhosts(s.zone, deltaTime);
     LegendTick();
+    BattleTick();
 }
 }  // namespace
 
