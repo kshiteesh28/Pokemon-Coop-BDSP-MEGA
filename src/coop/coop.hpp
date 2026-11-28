@@ -76,9 +76,22 @@ void ClearGhosts();
 // Legendary registry (legend.cpp). LegendTick runs on the main thread; the
 // network thread takes catches from the queue and reports them.
 void LegendTick();
-bool PopCaughtLegend(uint16_t& species);
 void ResetLegendReports();
 bool IsConnected();
+
+// Legendary events waiting for the network thread.
+enum class LegendEvent : uint8_t { FoundInParty, Escaped };
+bool PopLegendEvent(uint16_t& species, LegendEvent& kind);
+
+// Battle guard (net.cpp). Asks the server to reserve `species` for you and
+// waits up to timeoutMs. Returns true if someone else owns it or is battling it.
+// Main thread only (called from the Mega module's wild-battle hook via bridge.cpp).
+bool CheckLegendForBattle(uint16_t species, int32_t timeoutMs);
+// Set by CheckLegendForBattle when the server reserved a legendary for you, so
+// legend.cpp can release it again if you don't end up catching it.
+void NoteLegendBattle(uint16_t species);
+// True for species on the one-of-each list (no server round trip needed to know).
+bool IsTrackedLegend(uint16_t species);
 
 // Starts the network threads once (safe to call more than once).
 void StartNetwork();
