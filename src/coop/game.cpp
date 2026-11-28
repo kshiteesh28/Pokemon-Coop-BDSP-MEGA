@@ -61,6 +61,7 @@ void OnUpdateHook(FieldPlayerEntity::Object* self, float deltaTime, const Method
     nn::os::UnlockMutex(&gStateMutex);
 
     UpdateGhosts(s.zone, deltaTime);
+    LegendTick();
 }
 }  // namespace
 

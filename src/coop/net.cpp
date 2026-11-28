@@ -30,6 +30,29 @@ char gLastError[96] = "starting";
 nn::os::MutexType gSendMutex, gRemoteMutex;
 RemotePlayer gRemote[kMaxRemote];
 
+// Legendary owners in this room (for the status file).
+struct LegendOwner {
+    uint16_t species = 0;
+    uint8_t state = 0;  // 0 free, 1 being battled, 2 owned
+    char owner[25] = {};
+};
+LegendOwner gLegends[40];
+int gBadges = 0;  // gyms/E4/Champion recorded by the server for you
+
+void setLegend(uint16_t species, uint8_t state, const char* owner) {
+    LegendOwner* slot = nullptr;
+    for (auto& l : gLegends) {
+        if (l.species == species) slot = &l;  // existing entry wins
+    }
+    for (auto& l : gLegends) {
+        if (slot == nullptr && l.species == 0) slot = &l;  // else first free one
+    }
+    if (slot == nullptr) return;
+    slot->species = species;
+    slot->state = state;
+    strncpy(slot->owner, owner, sizeof(slot->owner) - 1);
+}
+
 nn::os::ThreadType gSendThread, gRecvThread;
 alignas(0x1000) uint8_t gSendStack[0x8000];
 alignas(0x1000) uint8_t gRecvStack[0x8000];
@@ -83,7 +106,9 @@ void disconnect(const char* why) {
 
     nn::os::LockMutex(&gRemoteMutex);
     for (auto& r : gRemote) r = RemotePlayer{};
+    for (auto& l : gLegends) l = LegendOwner{};
     nn::os::UnlockMutex(&gRemoteMutex);
+    ResetLegendReports();
     if (was) Log("Disconnected: %s", why);
     setError("%s", why);
 }
@@ -249,8 +274,43 @@ void handlePacket(uint8_t type, const uint8_t* p, size_t n) {
             Log("[chat] %s: %s", id == 0 ? "server" : name, text);
             break;
         }
+        case LegendReserveAck: {
+            uint16_t species = r.get<uint16_t>();
+            uint8_t status = r.get<uint8_t>();
+            char holder[25];
+            r.str(holder, 24, sizeof(holder));
+            if (!r.ok) break;
+            if (status == 0) {  // granted: it's ours, confirm the catch
+                Writer w;
+                w.put<uint16_t>(species);
+                w.put<uint8_t>(0);  // caught
+                sendPacket(w, LegendResult);
+                Log("Legendary #%d is now yours in room %s", species, gSettings.room);
+            } else if (status == 1) {
+                Log("%s already owns legendary #%d in this room: yours won't count", holder, species);
+            } else if (status == 2) {
+                Log("%s is battling legendary #%d right now", holder, species);
+            }
+            break;
+        }
+        case LegendUpdate: {
+            uint16_t species = r.get<uint16_t>();
+            uint8_t state = r.get<uint8_t>();
+            char owner[25];
+            r.str(owner, 24, sizeof(owner));
+            if (!r.ok) break;
+            nn::os::LockMutex(&gRemoteMutex);
+            setLegend(species, state, owner);
+            nn::os::UnlockMutex(&gRemoteMutex);
+            break;
+        }
+        case Progress: {
+            uint8_t count = r.get<uint8_t>();
+            if (r.ok) gBadges = count;
+            break;
+        }
         default:
-            break;  // PONG and features we don't use yet
+            break;  // PONG, roster, lobbies: handled by the app for now
     }
 }
 
@@ -292,6 +352,11 @@ void writeStatus(const LocalState& st, bool fresh) {
         if (!r.active || n <= 0 || n >= static_cast<int>(sizeof(buf)) - 96) continue;
         n += snprintf(buf + n, sizeof(buf) - n, "  #%d %s  map %d  (%.1f, %.1f)\n", r.id, r.name[0] ? r.name : "?", r.zone,
                       r.x, r.z);
+    }
+    if (n > 0 && n < static_cast<int>(sizeof(buf)) - 64) n += snprintf(buf + n, sizeof(buf) - n, "badges/wins recorded: %d\nlegendaries:\n", gBadges);
+    for (auto& l : gLegends) {
+        if (l.species == 0 || l.state == 0 || n <= 0 || n >= static_cast<int>(sizeof(buf)) - 64) continue;
+        n += snprintf(buf + n, sizeof(buf) - n, "  #%d %s %s\n", l.species, l.state == 2 ? "owned by" : "being battled by", l.owner);
     }
     nn::os::UnlockMutex(&gRemoteMutex);
     WriteStatusFile(buf);
@@ -361,6 +426,11 @@ void sendThreadMain(void*) {
                 continue;
             }
         }
+        for (uint16_t species; gConnected && PopCaughtLegend(species);) {
+            Writer w;
+            w.put<uint16_t>(species);
+            if (!sendPacket(w, LegendReserve)) break;
+        }
         if (tick % 40 == 0) {  // keep-alive every 2 s, also while in menus/battles
             Writer w;
             w.put<uint32_t>(static_cast<uint32_t>(tick * 50));
@@ -369,6 +439,8 @@ void sendThreadMain(void*) {
     }
 }
 }  // namespace
+
+bool IsConnected() { return gConnected; }
 
 int GetRemotePlayers(RemotePlayer* out, int max) {
     int n = 0;
