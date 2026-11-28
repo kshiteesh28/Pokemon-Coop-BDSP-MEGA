@@ -22,6 +22,12 @@ enum MsgType : uint8_t {
     PlayerLeave = 0x07,
     Ping = 0x08,
     Pong = 0x09,
+    RoomRoster = 0x11,
+    LegendReserve = 0x20,
+    LegendReserveAck = 0x21,
+    LegendResult = 0x22,
+    LegendUpdate = 0x23,
+    Progress = 0x3C,
     Chat = 0x40,
 };
 
