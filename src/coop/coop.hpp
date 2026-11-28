@@ -73,6 +73,13 @@ int GetRemotePlayers(RemotePlayer* out, int max);
 void UpdateGhosts(int32_t myZone, float deltaTime);
 void ClearGhosts();
 
+// Legendary registry (legend.cpp). LegendTick runs on the main thread; the
+// network thread takes catches from the queue and reports them.
+void LegendTick();
+bool PopCaughtLegend(uint16_t& species);
+void ResetLegendReports();
+bool IsConnected();
+
 // Starts the network threads once (safe to call more than once).
 void StartNetwork();
 
