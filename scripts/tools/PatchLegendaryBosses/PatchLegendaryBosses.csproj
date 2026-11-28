@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="AssetsTools.NET">
+      <HintPath>/Users/kshiteesh/Developer/Pokemon-mod-coop/Pokemon-Coop-version/scripts/tools/MegaBundleTool/bin/Release/net11.0/AssetsTools.NET.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
