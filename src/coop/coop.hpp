@@ -93,6 +93,14 @@ void NoteLegendBattle(uint16_t species);
 // True for species on the one-of-each list (no server round trip needed to know).
 bool IsTrackedLegend(uint16_t species);
 
+// Team challenges (battle.cpp + net.cpp). Main thread only.
+void OnTrainerBattleBegin(void* setupParam, int32_t enemyID0, int32_t enemyID1, int32_t partnerID, int32_t rule);
+void BattleTick();
+// True if you're in a battle lobby the host has started.
+bool GetStartedLobby(uint16_t& lobby, uint8_t& kind, uint16_t& target);
+// Tells the server how your side of the team challenge went.
+void SendBattleReport(uint16_t lobby, bool won, int32_t trainerID);
+
 // Starts the network threads once (safe to call more than once).
 void StartNetwork();
 

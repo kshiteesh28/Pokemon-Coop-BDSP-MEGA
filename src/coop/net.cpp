@@ -37,6 +37,11 @@ struct LegendOwner {
     char owner[25] = {};
 };
 LegendOwner gLegends[40];
+
+// Your battle lobby, if any (from BATTLE_LOBBY / BATTLE_START / BATTLE_END).
+volatile uint16_t gLobbyId = 0;
+volatile uint8_t gLobbyKind = 0, gLobbyState = 0;
+volatile uint16_t gLobbyTarget = 0;
 int gBadges = 0;  // gyms/E4/Champion recorded by the server for you
 
 // Latest LEGEND_RESERVE_ACK per species, so the battle guard can wait for it.
@@ -115,6 +120,8 @@ void disconnect(const char* why) {
     for (auto& r : gRemote) r = RemotePlayer{};
     for (auto& l : gLegends) l = LegendOwner{};
     nn::os::UnlockMutex(&gRemoteMutex);
+    gLobbyId = 0;
+    gLobbyState = 0;
     ResetLegendReports();
     if (was) Log("Disconnected: %s", why);
     setError("%s", why);
@@ -319,6 +326,37 @@ void handlePacket(uint8_t type, const uint8_t* p, size_t n) {
             nn::os::UnlockMutex(&gRemoteMutex);
             break;
         }
+        case BattleLobby: {
+            uint16_t id = r.get<uint16_t>();
+            uint8_t kind = r.get<uint8_t>();
+            uint16_t target = r.get<uint16_t>();
+            r.get<uint16_t>();  // host
+            uint8_t state = r.get<uint8_t>();
+            if (!r.ok) break;
+            bool started = state == 1 && (gLobbyId != id || gLobbyState != 1);
+            gLobbyId = id, gLobbyKind = kind, gLobbyTarget = target, gLobbyState = state;
+            if (started) Log("Your team challenge started (lobby %d): your next trainer battle counts", id);
+            break;
+        }
+        case BattleStart: {
+            uint16_t id = r.get<uint16_t>();
+            if (r.ok && id == gLobbyId && gLobbyState != 1) {
+                gLobbyState = 1;
+                Log("Your team challenge started (lobby %d): your next trainer battle counts", id);
+            }
+            break;
+        }
+        case BattleEnd: {
+            uint16_t id = r.get<uint16_t>();
+            uint8_t outcome = r.get<uint8_t>();
+            if (!r.ok) break;
+            if (id == gLobbyId) {
+                gLobbyId = 0;
+                gLobbyState = 0;
+            }
+            Log(outcome == 0 ? "Team challenge WON! Badges recorded for the team" : "Team challenge lost. Try again!");
+            break;
+        }
         case Progress: {
             uint8_t count = r.get<uint8_t>();
             if (r.ok) gBadges = count;
@@ -368,7 +406,12 @@ void writeStatus(const LocalState& st, bool fresh) {
         n += snprintf(buf + n, sizeof(buf) - n, "  #%d %s  map %d  (%.1f, %.1f)\n", r.id, r.name[0] ? r.name : "?", r.zone,
                       r.x, r.z);
     }
-    if (n > 0 && n < static_cast<int>(sizeof(buf)) - 64) n += snprintf(buf + n, sizeof(buf) - n, "badges/wins recorded: %d\nlegendaries:\n", gBadges);
+    if (n > 0 && n < static_cast<int>(sizeof(buf)) - 64) {
+        if (gLobbyId != 0)
+            n += snprintf(buf + n, sizeof(buf) - n, "team challenge: lobby %d %s\n", gLobbyId,
+                          gLobbyState == 1 ? "started: your next trainer battle counts" : "waiting in lobby");
+        n += snprintf(buf + n, sizeof(buf) - n, "badges/wins recorded: %d\nlegendaries:\n", gBadges);
+    }
     for (auto& l : gLegends) {
         if (l.species == 0 || l.state == 0 || n <= 0 || n >= static_cast<int>(sizeof(buf)) - 64) continue;
         n += snprintf(buf + n, sizeof(buf) - n, "  #%d %s %s\n", l.species, l.state == 2 ? "owned by" : "being battled by", l.owner);
@@ -465,6 +508,20 @@ void sendThreadMain(void*) {
 }  // namespace
 
 bool IsConnected() { return gConnected; }
+
+bool GetStartedLobby(uint16_t& lobby, uint8_t& kind, uint16_t& target) {
+    if (!gConnected || gLobbyId == 0 || gLobbyState != 1) return false;
+    lobby = gLobbyId, kind = gLobbyKind, target = gLobbyTarget;
+    return true;
+}
+
+void SendBattleReport(uint16_t lobby, bool won, int32_t trainerID) {
+    Writer w;
+    w.put<uint16_t>(lobby);
+    w.put<uint8_t>(won ? 0 : 1);  // 0 win, 1 loss
+    w.put<int32_t>(trainerID);
+    if (sendPacket(w, BattleReport)) Log("Reported your battle: %s", won ? "won" : "lost");
+}
 
 bool CheckLegendForBattle(uint16_t species, int32_t timeoutMs) {
     // Ordinary wild Pokemon never wait on the network.
