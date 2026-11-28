@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/mega-evolution
+      - feature/coop-server
   pull_request:
     branches:
       - main
