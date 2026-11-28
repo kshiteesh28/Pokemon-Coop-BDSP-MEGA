@@ -10,9 +10,20 @@ Status: **server and app are done; the in-game part is planned here but not buil
 | Game: see others on your map (markers) | ✅ written (`src/coop/ghosts.cpp`), untested in game |
 | Game: report caught legendaries to the room | ✅ written (`src/coop/legend.cpp`), untested in game |
 | Game: legendary someone else owns → battle without Poké Balls; unclaimed ones released after a failed catch | ✅ written (`src/coop/bridge.cpp` + Mega's `SetupBattleWild`), untested in game |
-| Game: real 2-vs-2 battles synced between players | ⏳ steps 1–2 below |
+| Game: **team challenges**: each teammate fights the leader in their own game; the game reports the result automatically; the team wins if everyone wins | ✅ written (`src/coop/battle.cpp` + Mega's `SetupBattleTrainer`), untested in game |
+| Game: `[probe]` log line for every trainer battle (rule, trainer IDs, partner ID) | ✅ written; collects the data step 1 needs |
+| Game: real 2-vs-2 battles synced between players | ⏳ steps 1–2 below. Needs a partner trainer ID and a determinism check |
 
-Until the game side exists, a team **opens a lobby in the app**, battles in their own games, and the **host clicks "We won" / "We lost"**. On a win, the server records the badge for everyone in the lobby.
+How a team challenge works today:
+1. The team opens a lobby in the app and the host presses Start.
+2. Each player's **next trainer battle** in their own game counts for the team.
+3. When they're back in the overworld, `battle.cpp` reads the result from `BATTLE_SETUP_PARAM.result`, which it sets to a marker at setup so "unchanged" means "not finished", and sends `BATTLE_REPORT`.
+4. When everyone has reported, the server ends the lobby. The team wins only if everyone won, and on a win the badge is recorded for the whole team.
+5. Players without the co-op module can still have the host report the result by hand.
+
+A player's **app and game are linked** by identity (same name and trainer ID in the same room). The lobby is made in the app, and the game hears `BATTLE_LOBBY` / `BATTLE_START` and reports for it.
+
+**Unknowns the first test settles:** `BtlResult` is assumed to be 1 for a win. Every report logs the raw code as `[probe] battle result code N`, so check that it says 1 after a win.
 
 ## Why this lives in subsdk2, not subsdk3
 

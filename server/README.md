@@ -33,6 +33,16 @@ The **Team battles** card opens a server lobby for a gym, an Elite Four member o
 - When everyone is ready, the host starts the battle.
 - Until in-game battle sync exists (see `docs/COOP_BATTLES.md`), the host reports **We won / We lost**, and a win records the badge for the whole team.
 
+## In-game battle reports (0x3D)
+
+`BATTLE_REPORT` (C→S): `lobby_id u16, outcome u8 (0 win, 1 loss), trainer_id i32`.
+- A player's game sends it after a team-challenge battle.
+- `BATTLE_LOBBY` members carry a 4th byte, `report` (0 still battling, 1 won, 2 lost), so everyone sees progress.
+- When every member has reported, the lobby ends. The team wins only if everyone won.
+- If a player leaves mid-battle, the remaining reports decide the result.
+
+**Linked connections:** the same player connected from the app and from the game (same identity in the same room) shares lobby membership. Lobby messages go to both, and the game's report counts for the lobby joined in the app. A game that connects after the lobby already exists gets its current state right away.
+
 ## Room chat (0x40)
 
 | Dir | Payload |
