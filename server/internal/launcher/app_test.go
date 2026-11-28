@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kshiteesh28/Pokemon-Coop-BDSP-MEGA/server/internal/config"
+	"github.com/kshiteesh28/Pokemon-Coop-BDSP-MEGA/server/protocol"
 )
 
 func freePort(t *testing.T) int {
@@ -329,4 +330,61 @@ func TestPastePath(t *testing.T) {
 	if got := h.state().Settings.Ryujinx; got != exe {
 		t.Fatalf("ryujinx = %q", got)
 	}
+}
+
+func TestBattleLobbyFromApp(t *testing.T) {
+	h := newHarness(t)
+	h.call("/api/settings", map[string]string{"Name": "Aaroh", "Room": "AAROH"})
+	h.call("/api/host", map[string]bool{"on": true})
+	if code, out := h.call("/api/join", map[string]bool{"on": true}); code != 200 {
+		t.Fatalf("join: %d %v", code, out)
+	}
+	friend, err := JoinServer(config.Client{Address: "127.0.0.1:" + itoa(h.app.opt.HostPort), Room: "AAROH", Name: "Rahul"}, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer friend.Leave()
+
+	// The roster lists both, even across maps.
+	waitFor(t, "roster", func() bool { return len(h.state().Join.Roster) == 2 })
+
+	// 3-player gym is refused with a friendly message.
+	h.call("/api/battle", map[string]any{"action": "create", "kind": 0, "target": 1, "max": 3})
+	waitFor(t, "duo-only note", func() bool { return strings.Contains(h.state().Join.BattleNote.Text, "solo or duo") })
+
+	h.call("/api/battle", map[string]any{"action": "create", "kind": 0, "target": 1, "max": 2})
+	waitFor(t, "lobby", func() bool { l := h.state().Join.Lobby; return l != nil && l.YouAreHost })
+	var rahulID uint16
+	for _, r := range h.state().Join.Roster {
+		if r.Name == "Rahul" {
+			rahulID = r.ID
+		}
+	}
+	h.call("/api/battle", map[string]any{"action": "invite", "player": rahulID})
+	waitFor(t, "friend gets invite", func() bool {
+		v := friend.View()
+		return len(v.Invites) == 1 && v.Invites[0].From == "Aaroh" && v.Invites[0].Target == 1
+	})
+	inv := friend.View().Invites[0]
+	if err := friend.BattleAction("join", 0, 0, 0, 0, inv.LobbyID, 0); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "two members", func() bool { l := h.state().Join.Lobby; return l != nil && len(l.Members) == 2 })
+	h.call("/api/battle", map[string]any{"action": "ready"})
+	friend.BattleAction("ready", 0, 0, 0, 0, 0, 0)
+	waitFor(t, "both ready", func() bool {
+		l := h.state().Join.Lobby
+		return l != nil && len(l.Members) == 2 && l.Members[0].Ready && l.Members[1].Ready
+	})
+	h.call("/api/battle", map[string]any{"action": "start"})
+	waitFor(t, "in battle", func() bool { l := h.state().Join.Lobby; return l != nil && l.InBattle })
+	h.call("/api/battle", map[string]any{"action": "result", "outcome": 0})
+	waitFor(t, "badge for both", func() bool {
+		st := h.state().Join
+		fv := friend.View()
+		has := func(p []protocol.ProgressEntry) bool {
+			return len(p) == 1 && p[0] == protocol.ProgressEntry{Kind: protocol.BattleGym, Target: 1}
+		}
+		return st.Lobby == nil && has(st.Progress) && has(fv.Progress) && strings.Contains(st.BattleNote.Text, "won")
+	})
 }
