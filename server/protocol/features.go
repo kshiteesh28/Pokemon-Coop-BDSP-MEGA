@@ -23,6 +23,7 @@ const (
 	MsgBattleEnd    MsgType = 0x3A // S→C  lobby_id u16, outcome u8, count u8, count×player_id u16
 	MsgBattleError  MsgType = 0x3B // S→C  lobby_id u16, code u8
 	MsgProgress     MsgType = 0x3C // S→C  count u8, count×(kind u8, target u16)
+	MsgBattleReport MsgType = 0x3D // C→S  lobby_id u16, outcome u8 (0 win, 1 loss), trainer_id i32: your own game's result
 )
 
 // LEGEND_RESERVE_ACK status.
@@ -190,7 +191,15 @@ type BattleMember struct {
 	PlayerID  uint16
 	Ready     uint8
 	Completed uint8 // 1 = already beat this gym/E4 member/Champion: joining as a helper
+	Report    uint8 // during the battle: 0 still fighting, 1 won, 2 lost (from BATTLE_REPORT)
 }
+
+// Member report values in BATTLE_LOBBY.
+const (
+	ReportPending uint8 = 0
+	ReportWon     uint8 = 1
+	ReportLost    uint8 = 2
+)
 
 type BattleLobby struct {
 	LobbyID    uint16
@@ -215,6 +224,7 @@ func (m *BattleLobby) Marshal() []byte {
 		w.u16(x.PlayerID)
 		w.u8(x.Ready)
 		w.u8(x.Completed)
+		w.u8(x.Report)
 	}
 	return w.b
 }
@@ -224,7 +234,7 @@ func (m *BattleLobby) Unmarshal(b []byte) error {
 	n := int(r.u8())
 	m.Members = nil
 	for i := 0; i < n && r.err == nil; i++ {
-		m.Members = append(m.Members, BattleMember{r.u16(), r.u8(), r.u8()})
+		m.Members = append(m.Members, BattleMember{r.u16(), r.u8(), r.u8(), r.u8()})
 	}
 	return r.err
 }
@@ -479,6 +489,32 @@ func (m *RoomRoster) Unmarshal(b []byte) error {
 	m.Entries = nil
 	for i := 0; i < n && r.err == nil; i++ {
 		m.Entries = append(m.Entries, RosterEntry{r.u16(), r.i32(), r.str(24)})
+	}
+	return r.err
+}
+
+// BattleReport: a player's own game reports how their side of a team
+// challenge went. When every member has reported, the server ends the lobby:
+// the team wins only if everyone won.
+type BattleReport struct {
+	LobbyID   uint16
+	Outcome   uint8
+	TrainerID int32 // the opponent the game actually fought (for the log)
+}
+
+func (m *BattleReport) Marshal() []byte {
+	w := &writer{}
+	w.u16(m.LobbyID)
+	w.u8(m.Outcome)
+	w.i32(m.TrainerID)
+	return w.b
+}
+
+func (m *BattleReport) Unmarshal(b []byte) error {
+	r := &reader{b: b}
+	m.LobbyID, m.Outcome = r.u16(), r.u8()
+	if len(b) >= 7 {
+		m.TrainerID = r.i32()
 	}
 	return r.err
 }
