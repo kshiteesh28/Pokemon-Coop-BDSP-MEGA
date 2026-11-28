@@ -290,7 +290,8 @@ func (a *App) state() stateView {
 	if p != nil {
 		st.Join = p.View()
 	} else {
-		st.Join = PlayerView{State: "off", Reason: joinErr, Peers: []PeerView{}, Legends: []LegendView{}, Chat: []ChatLine{}}
+		st.Join = PlayerView{State: "off", Reason: joinErr, Peers: []PeerView{}, Legends: []LegendView{}, Chat: []ChatLine{},
+			Roster: []RosterView{}, Invites: []InviteView{}}
 	}
 	return st
 }
@@ -438,6 +439,25 @@ func (a *App) Handler() http.Handler {
 		fw.Unlock()
 		a.logf("Firewall rules added")
 		return ok, nil
+	})
+	api("/api/battle", func(r *http.Request) (any, error) {
+		var req struct {
+			Action  string
+			Kind    uint8
+			Target  uint16
+			Max     uint8
+			Player  uint16
+			Lobby   uint16
+			Outcome uint8
+		}
+		json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4096)).Decode(&req)
+		a.mu.Lock()
+		p := a.player
+		a.mu.Unlock()
+		if p == nil {
+			return nil, fmt.Errorf("Join a room first.")
+		}
+		return ok, p.BattleAction(req.Action, req.Kind, req.Target, req.Max, req.Player, req.Lobby, req.Outcome)
 	})
 	api("/api/tailscale", func(r *http.Request) (any, error) {
 		var req struct{ Action string }

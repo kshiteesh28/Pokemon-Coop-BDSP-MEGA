@@ -34,6 +34,11 @@ type Player struct {
 	legends  map[uint16]protocol.LegendUpdate
 	chat     []ChatLine
 	chatSeq  int
+	roster   []protocol.RosterEntry
+	lobby    *protocol.BattleLobby
+	invites  map[uint16]InviteView
+	lastNote BattleNote
+	noteSeq  int
 }
 
 // ChatLine is one room chat message. System lines (rate-limit warnings) have From == "".
@@ -62,16 +67,20 @@ type PeerView struct {
 }
 
 type PlayerView struct {
-	State    string                   `json:"state"`
-	Reason   string                   `json:"reason,omitempty"`
-	ID       uint16                   `json:"id"`
-	Room     string                   `json:"room"`
-	Addr     string                   `json:"addr"`
-	RttMs    int                      `json:"rtt_ms"`
-	Peers    []PeerView               `json:"peers"`
-	Progress []protocol.ProgressEntry `json:"progress"`
-	Legends  []LegendView             `json:"legends"`
-	Chat     []ChatLine               `json:"chat"`
+	State      string                   `json:"state"`
+	Reason     string                   `json:"reason,omitempty"`
+	ID         uint16                   `json:"id"`
+	Room       string                   `json:"room"`
+	Addr       string                   `json:"addr"`
+	RttMs      int                      `json:"rtt_ms"`
+	Peers      []PeerView               `json:"peers"`
+	Progress   []protocol.ProgressEntry `json:"progress"`
+	Legends    []LegendView             `json:"legends"`
+	Chat       []ChatLine               `json:"chat"`
+	Roster     []RosterView             `json:"roster"`
+	Lobby      *LobbyView               `json:"lobby"`
+	Invites    []InviteView             `json:"invites"`
+	BattleNote BattleNote               `json:"battle_note"`
 }
 
 type LegendView struct {
@@ -116,7 +125,7 @@ func JoinServer(cfg config.Client, logf func(string, ...any)) (*Player, error) {
 	room, _ := coop.NormalizeRoomCode(cfg.Room)
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Player{cancel: cancel, done: make(chan struct{}), client: c, state: "online", id: ack.PlayerID, room: room, addr: cfg.Address,
-		peers: map[uint16]*peer{}, legends: map[uint16]protocol.LegendUpdate{}}
+		peers: map[uint16]*peer{}, legends: map[uint16]protocol.LegendUpdate{}, invites: map[uint16]InviteView{}}
 	logf("Joined room %s on %s as #%d", room, cfg.Address, ack.PlayerID)
 	go p.run(ctx, c, logf)
 	return p, nil
@@ -143,6 +152,7 @@ func (p *Player) View() PlayerView {
 	v := PlayerView{State: p.state, Reason: p.reason, ID: p.id, Room: p.room, Addr: p.addr, RttMs: p.rttMs,
 		Progress: append([]protocol.ProgressEntry{}, p.progress...), Peers: []PeerView{}, Legends: []LegendView{},
 		Chat: append([]ChatLine{}, p.chat...)}
+	p.battleView(&v)
 	for id, pe := range p.peers {
 		dist := -1.0
 		if pe.HasPos {
@@ -203,12 +213,16 @@ func (p *Player) setOffline(reason string) {
 	p.mu.Lock()
 	p.state, p.reason = "offline", reason
 	p.peers = map[uint16]*peer{}
+	p.roster, p.lobby, p.invites = nil, nil, map[uint16]InviteView{}
 	p.mu.Unlock()
 }
 
 func (p *Player) handle(pkt mockclient.Packet, start time.Time, logf func(string, ...any)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.handleLobbyPacket(pkt.Type, pkt.Payload, logf) {
+		return
+	}
 	switch pkt.Type {
 	case protocol.MsgPlayerMeta:
 		var m protocol.PlayerMeta
