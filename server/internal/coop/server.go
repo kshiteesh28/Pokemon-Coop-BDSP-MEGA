@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -335,6 +336,7 @@ func (s *Server) remove(c *client, reason uint8, why string) {
 			s.send(p, protocol.MsgPlayerLeave, leave)
 		}
 		s.logf("room %s: %q (#%d) left: %s (%d/%d)", r.code, c.app.Name, c.pid, why, len(r.players), s.cfg.MaxPlayersPerRoom)
+		s.broadcastRoster(r)
 		if len(r.players) == 0 {
 			delete(s.rooms, r.code)
 			s.logf("room %s closed (empty)", r.code)
@@ -487,6 +489,7 @@ func (s *Server) onHello(c *client, p []byte) {
 	c.zone = m.InitialZone
 	c.state.Zone = m.InitialZone
 	s.enterZone(c)
+	s.broadcastRoster(r)
 	s.sendInitialFeatureState(c)
 }
 
@@ -540,6 +543,20 @@ func (s *Server) moveZone(c *client, newZone int32) {
 	s.vlogf("room %s: #%d zone %d -> %d", r.code, c.pid, c.zone, newZone)
 	c.zone = newZone
 	s.enterZone(c)
+	s.broadcastRoster(r)
+}
+
+// broadcastRoster tells everyone in the room who's in it and on which map.
+func (s *Server) broadcastRoster(r *room) {
+	var m protocol.RoomRoster
+	for _, p := range r.players {
+		m.Entries = append(m.Entries, protocol.RosterEntry{PlayerID: p.pid, Zone: p.zone, Name: p.app.Name})
+	}
+	sort.Slice(m.Entries, func(i, j int) bool { return m.Entries[i].PlayerID < m.Entries[j].PlayerID })
+	out := m.Marshal()
+	for _, p := range r.players {
+		s.send(p, protocol.MsgRoomRoster, out)
+	}
 }
 
 func (s *Server) onCoopEvent(c *client, p []byte, now time.Time) {

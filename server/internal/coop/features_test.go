@@ -381,3 +381,41 @@ func TestRoomChat(t *testing.T) {
 		t.Fatal("chat leaked to another room")
 	}
 }
+
+func TestRoomRoster(t *testing.T) {
+	addr := startServer(t, Config{})
+	a, _ := joinID(t, addr, "RR", "Ash", 1)
+	b, ackB := joinID(t, addr, "RR", "Brock", 2)
+	want := func(c *mockclient.Client, names ...string) protocol.RoomRoster {
+		t.Helper()
+		deadline := time.Now().Add(wait)
+		for time.Now().Before(deadline) {
+			var r protocol.RoomRoster
+			recv(t, c, protocol.MsgRoomRoster, &r)
+			if len(r.Entries) != len(names) {
+				continue
+			}
+			ok := true
+			for i, n := range names {
+				ok = ok && r.Entries[i].Name == n
+			}
+			if ok {
+				return r
+			}
+		}
+		t.Fatalf("no roster with %v", names)
+		return protocol.RoomRoster{}
+	}
+	want(a, "Ash", "Brock")
+	// Brock walks to another map: still in the roster, with the new map.
+	b.Send(protocol.MsgZoneChange, (&protocol.ZoneChange{OldZone: 1, NewZone: 77}).Marshal())
+	r := want(a, "Ash", "Brock")
+	for r.Entries[1].Zone != 77 {
+		r = want(a, "Ash", "Brock")
+	}
+	if r.Entries[1].PlayerID != ackB.PlayerID {
+		t.Fatalf("roster %+v", r)
+	}
+	b.Close()
+	want(a, "Ash")
+}
